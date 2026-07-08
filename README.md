@@ -24,8 +24,8 @@ be transcribed independently (e.g. whisper.cpp per track).
 ## Build & install
 
 ```sh
-make install          # builds and copies the binary to ~/bin/rec
-# or: make install PREFIX=/usr/local/bin
+make install PREFIX=/opt/homebrew/bin   # already on PATH on Apple Silicon
+# default PREFIX is ~/bin: make install
 ```
 
 ## First run — permissions
