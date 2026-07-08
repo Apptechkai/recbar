@@ -73,6 +73,22 @@ Recording + Microphone → *RecBar*). Note: with the default ad-hoc signing,
 macOS forgets that grant every time you rebuild the app; sign with a real
 identity to keep it (`make app SIGN="Developer ID Application: …"`).
 
+## Transcribe to subtitles (RecBar)
+
+RecBar's panel has **Transcribe File to Subtitles…** — pick any video/audio
+file and it writes a `.srt` next to it, with a live progress bar. Runs fully
+local via `whisperkit-cli` (brew) using the WhisperKit models MacWhisper has
+already downloaded (large-v3 preferred). Files with exactly two audio tracks
+(rec-cli recordings) get speaker-labeled cues: `[Them]` = system audio,
+`[Me]` = mic.
+
+**Translate to English** uses whisper's built-in translate task: any spoken
+language → English subtitles, still offline. (Other target languages need an
+external translation step — not built.)
+
+Requires: `brew install whisperkit-cli ffmpeg` and at least one WhisperKit
+model downloaded via MacWhisper.
+
 ## Hearing what you recorded (multi-track playback)
 
 The tracks are separate **by design**, which trips up players:
