@@ -44,9 +44,16 @@ Then quit and reopen the terminal and run `rec start` again.
 ```sh
 rec start                       # record to ~/Movies/recordings/rec-<timestamp>.mov
 rec start ~/Desktop/demo.mov    # record to a specific file
+rec start --audio-only          # no video: just system audio + mic (~115 MB/hour)
 rec status                      # is a recording running?
 rec stop                        # stop cleanly from another terminal
 ```
+
+`--audio-only` (or `-a`) drops the video track but keeps the same two separate
+audio tracks. System audio means **everything the Mac plays** — Chrome, VLC,
+Spotify, any app — so it also works as a plain audio grabber. Note that macOS
+gates system-audio capture behind the same "Screen & System Audio Recording"
+permission even when no video is recorded.
 
 Stop with **Ctrl+C** in the recording terminal, or `rec stop` from anywhere.
 Both paths finalize the file properly. The file is also written in 5-second

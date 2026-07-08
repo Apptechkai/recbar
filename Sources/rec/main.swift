@@ -15,6 +15,8 @@ func usage() -> Never {
                                into one .mov with 3 separate tracks.
                                Default output: ~/Movies/recordings/rec-<timestamp>.mov
                                Stop with Ctrl+C, or `rec stop` from another terminal.
+        --audio-only | -a      Skip the screen: record just system audio + mic
+                               (still 2 separate tracks, ~115 MB/hour).
       rec stop                 Cleanly stop a recording started elsewhere.
       rec status               Show whether a recording is running.
     """)
@@ -36,12 +38,13 @@ func runningPID() -> pid_t? {
     return nil
 }
 
-func defaultOutputURL() -> URL {
+func defaultOutputURL(audioOnly: Bool) -> URL {
     let formatter = DateFormatter()
     formatter.dateFormat = "yyyy-MM-dd-HHmmss"
     let dir = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Movies/recordings")
-    return dir.appendingPathComponent("rec-\(formatter.string(from: Date())).mov")
+    let suffix = audioOnly ? "-audio" : ""
+    return dir.appendingPathComponent("rec-\(formatter.string(from: Date()))\(suffix).mov")
 }
 
 func formatDuration(_ seconds: TimeInterval) -> String {
@@ -104,7 +107,7 @@ func ensurePermissions() async {
 
 // MARK: - Subcommands
 
-func commandStart(outputPath: String?) async {
+func commandStart(outputPath: String?, audioOnly: Bool) async {
     if let pid = runningPID() {
         fail("A recording is already running (pid \(pid)). Stop it with `rec stop`.")
     }
@@ -113,7 +116,7 @@ func commandStart(outputPath: String?) async {
     if let path = outputPath {
         outputURL = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
     } else {
-        outputURL = defaultOutputURL()
+        outputURL = defaultOutputURL(audioOnly: audioOnly)
     }
     do {
         try FileManager.default.createDirectory(
@@ -129,7 +132,7 @@ func commandStart(outputPath: String?) async {
 
     let recorder: Recorder
     do {
-        recorder = try await Recorder(outputURL: outputURL)
+        recorder = try await Recorder(outputURL: outputURL, audioOnly: audioOnly)
         try await recorder.start()
     } catch {
         fail("Could not start capture: \(error)")
@@ -138,8 +141,12 @@ func commandStart(outputPath: String?) async {
     try? "\(ProcessInfo.processInfo.processIdentifier)"
         .write(toFile: pidFilePath, atomically: true, encoding: .utf8)
 
-    print("● Recording  →  \(outputURL.path)")
-    print("  video (HEVC) + system audio (track 1) + mic (track 2), no on-screen UI")
+    print("● Recording\(audioOnly ? " (audio only)" : "")  →  \(outputURL.path)")
+    if audioOnly {
+        print("  system audio (track 1) + mic (track 2), no video, no on-screen UI")
+    } else {
+        print("  video (HEVC) + system audio (track 1) + mic (track 2), no on-screen UI")
+    }
     print("  Stop with Ctrl+C here, or `rec stop` from another terminal.")
 
     let stopSignal = StopSignal()
@@ -213,8 +220,11 @@ func commandStatus() {
 let arguments = Array(CommandLine.arguments.dropFirst())
 switch arguments.first {
 case "start":
-    if arguments.count > 2 { usage() }
-    await commandStart(outputPath: arguments.count == 2 ? arguments[1] : nil)
+    var rest = Array(arguments.dropFirst())
+    let audioOnly = rest.contains("--audio-only") || rest.contains("-a")
+    rest.removeAll { $0 == "--audio-only" || $0 == "-a" }
+    if rest.count > 1 { usage() }
+    await commandStart(outputPath: rest.first, audioOnly: audioOnly)
 case "stop":
     commandStop()
 case "status":

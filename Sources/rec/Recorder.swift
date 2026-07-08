@@ -21,11 +21,12 @@ private final class StreamDelegateProxy: NSObject, SCStreamDelegate {
 /// audio, mic). Audio is never mixed, so each track can be transcribed alone.
 final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
     let outputURL: URL
+    let audioOnly: Bool
 
     private let stream: SCStream
     private let streamDelegate = StreamDelegateProxy()
     private let writer: AVAssetWriter
-    private let videoInput: AVAssetWriterInput
+    private let videoInput: AVAssetWriterInput?
     private let systemAudioInput: AVAssetWriterInput
     private let micInput: AVAssetWriterInput
 
@@ -40,8 +41,9 @@ final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
     /// or permission is revoked mid-recording.
     var onStreamStopped: ((Error?) -> Void)?
 
-    init(outputURL: URL) async throws {
+    init(outputURL: URL, audioOnly: Bool = false) async throws {
         self.outputURL = outputURL
+        self.audioOnly = audioOnly
 
         // -- Pick the main display ------------------------------------------
         let content = try await SCShareableContent.excludingDesktopWindows(
@@ -61,9 +63,17 @@ final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
 
         // -- Stream configuration -------------------------------------------
         let config = SCStreamConfiguration()
-        config.width = pixelWidth
-        config.height = pixelHeight
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+        if audioOnly {
+            // SCK insists on a display filter even for audio capture; shrink
+            // the (discarded) video pipeline to almost nothing.
+            config.width = 2
+            config.height = 2
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+        } else {
+            config.width = pixelWidth
+            config.height = pixelHeight
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+        }
         config.queueDepth = 8
         config.showsCursor = true
 
@@ -86,7 +96,7 @@ final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
 
         // HEVC ~4 Mbps: screen content is mostly static, this lands around
         // 1.8 GB/hour at full Retina resolution and stays crisp.
-        videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: [
+        videoInput = audioOnly ? nil : AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.hevc,
             AVVideoWidthKey: pixelWidth,
             AVVideoHeightKey: pixelHeight,
@@ -111,7 +121,7 @@ final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
             AVEncoderBitRateKey: 96_000,
         ])
 
-        for input in [videoInput, systemAudioInput, micInput] {
+        for input in [videoInput, systemAudioInput, micInput].compactMap({ $0 }) {
             input.expectsMediaDataInRealTime = true
             writer.add(input)
         }
@@ -120,7 +130,9 @@ final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
 
         streamDelegate.onStop = { [weak self] error in self?.onStreamStopped?(error) }
 
-        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
+        if !audioOnly {
+            try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
+        }
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
         try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: queue)
     }
@@ -145,7 +157,7 @@ final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
             throw RecError("No frames were captured; nothing was written.")
         }
 
-        videoInput.markAsFinished()
+        videoInput?.markAsFinished()
         systemAudioInput.markAsFinished()
         micInput.markAsFinished()
         await writer.finishWriting()
@@ -165,6 +177,7 @@ final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
 
         switch type {
         case .screen:
+            guard let videoInput else { return }  // audio-only mode
             // SCK sends placeholder frames (idle/blank); only keep complete ones.
             guard let info = (CMSampleBufferGetSampleAttachmentsArray(
                     sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]])?.first,
@@ -174,23 +187,28 @@ final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
 
             // Anchor the writer session to the first real video frame so all
             // three tracks share one timeline with no black lead-in.
-            if !sessionStarted {
-                writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
-                sessionStarted = true
-            }
+            startSessionIfNeeded(at: sampleBuffer)
             append(sampleBuffer, to: videoInput)
 
         case .audio:
+            if audioOnly { startSessionIfNeeded(at: sampleBuffer) }
             guard sessionStarted else { return }
             append(sampleBuffer, to: systemAudioInput)
 
         case .microphone:
+            if audioOnly { startSessionIfNeeded(at: sampleBuffer) }
             guard sessionStarted else { return }
             append(sampleBuffer, to: micInput)
 
         @unknown default:
             break
         }
+    }
+
+    private func startSessionIfNeeded(at sampleBuffer: CMSampleBuffer) {
+        guard !sessionStarted else { return }
+        writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
+        sessionStarted = true
     }
 
     private func append(_ sampleBuffer: CMSampleBuffer, to input: AVAssetWriterInput) {
