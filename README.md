@@ -59,6 +59,33 @@ Stop with **Ctrl+C** in the recording terminal, or `rec stop` from anywhere.
 Both paths finalize the file properly. The file is also written in 5-second
 fragments, so even a hard crash mid-meeting leaves a recoverable recording.
 
+## RecBar — menu bar app
+
+A minimal menu bar UI over the same engine: `make install-app` builds
+`RecBar.app` into /Applications. The ◉ icon gives Start/Stop, an audio-only
+toggle, elapsed time, and quick access to the recordings folder. No window, no
+dock icon — nothing on screen while presenting. It shares the CLI's pidfile,
+so `rec stop` in a terminal also stops a RecBar recording, and the two can
+never double-record.
+
+RecBar needs its own one-time permission grant (Screen & System Audio
+Recording + Microphone → *RecBar*). Note: with the default ad-hoc signing,
+macOS forgets that grant every time you rebuild the app; sign with a real
+identity to keep it (`make app SIGN="Developer ID Application: …"`).
+
+## Hearing what you recorded (multi-track playback)
+
+The tracks are separate **by design**, which trips up players:
+
+- **QuickTime Player** mixes all tracks — you hear both sides at once.
+- **VLC** plays only ONE audio track at a time and defaults to track 1 (system
+  audio). Your voice is on track 2: Audio → Audio Track → Track 2.
+- To listen to one side alone: `ffmpeg -i meeting.mov -map 0:a:1 me.wav`
+
+Also remember track 1 is digital silence unless the Mac was actually playing
+sound — in a mic-only test the "movie" can sound silent in VLC even though the
+mic track is fine.
+
 ## Splitting the tracks afterwards
 
 ```sh

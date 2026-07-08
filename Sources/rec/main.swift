@@ -1,10 +1,9 @@
 import AVFoundation
 import CoreGraphics
 import Foundation
+import RecCore
 
 // MARK: - Helpers
-
-let pidFilePath = "/tmp/rec-cli.pid"
 
 func usage() -> Never {
     print("""
@@ -26,30 +25,6 @@ func usage() -> Never {
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data(("rec: " + message + "\n").utf8))
     exit(1)
-}
-
-func runningPID() -> pid_t? {
-    guard let text = try? String(contentsOfFile: pidFilePath, encoding: .utf8),
-          let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines))
-    else { return nil }
-    // kill 0 = existence check only. ESRCH means the pidfile is stale.
-    if kill(pid, 0) == 0 { return pid }
-    try? FileManager.default.removeItem(atPath: pidFilePath)
-    return nil
-}
-
-func defaultOutputURL(audioOnly: Bool) -> URL {
-    let formatter = DateFormatter()
-    formatter.dateFormat = "yyyy-MM-dd-HHmmss"
-    let dir = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Movies/recordings")
-    let suffix = audioOnly ? "-audio" : ""
-    return dir.appendingPathComponent("rec-\(formatter.string(from: Date()))\(suffix).mov")
-}
-
-func formatDuration(_ seconds: TimeInterval) -> String {
-    let s = Int(seconds)
-    return String(format: "%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
 }
 
 func fileSizeString(_ url: URL) -> String {
@@ -108,7 +83,7 @@ func ensurePermissions() async {
 // MARK: - Subcommands
 
 func commandStart(outputPath: String?, audioOnly: Bool) async {
-    if let pid = runningPID() {
+    if let pid = PidFile.runningPID() {
         fail("A recording is already running (pid \(pid)). Stop it with `rec stop`.")
     }
 
@@ -116,7 +91,7 @@ func commandStart(outputPath: String?, audioOnly: Bool) async {
     if let path = outputPath {
         outputURL = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
     } else {
-        outputURL = defaultOutputURL(audioOnly: audioOnly)
+        outputURL = RecPaths.defaultOutputURL(audioOnly: audioOnly)
     }
     do {
         try FileManager.default.createDirectory(
@@ -138,8 +113,7 @@ func commandStart(outputPath: String?, audioOnly: Bool) async {
         fail("Could not start capture: \(error)")
     }
 
-    try? "\(ProcessInfo.processInfo.processIdentifier)"
-        .write(toFile: pidFilePath, atomically: true, encoding: .utf8)
+    PidFile.write()
 
     print("● Recording\(audioOnly ? " (audio only)" : "")  →  \(outputURL.path)")
     if audioOnly {
@@ -179,7 +153,7 @@ func commandStart(outputPath: String?, audioOnly: Bool) async {
     heartbeat.cancel()
     print("\nStopping (\(reason)) — finalizing file…")
 
-    defer { try? FileManager.default.removeItem(atPath: pidFilePath) }
+    defer { PidFile.remove() }
     do {
         try await recorder.stopAndFinish()
     } catch {
@@ -191,15 +165,16 @@ func commandStart(outputPath: String?, audioOnly: Bool) async {
 }
 
 func commandStop() {
-    guard let pid = runningPID() else {
+    guard let pid = PidFile.runningPID() else {
         fail("No recording is running.")
     }
     kill(pid, SIGINT)
     print("Sent stop to recording (pid \(pid)); waiting for it to finalize…")
-    // Wait up to 15s for the recorder to finalize and exit.
+    // Wait up to 15s. The CLI exits when done; RecBar keeps running but
+    // removes the pidfile — either signals a clean finalize.
     for _ in 0..<150 {
         usleep(100_000)
-        if kill(pid, 0) != 0 {
+        if kill(pid, 0) != 0 || !FileManager.default.fileExists(atPath: PidFile.path) {
             print("✔ Recording stopped and saved.")
             exit(0)
         }
@@ -208,7 +183,7 @@ func commandStop() {
 }
 
 func commandStatus() {
-    if let pid = runningPID() {
+    if let pid = PidFile.runningPID() {
         print("● Recording in progress (pid \(pid)).")
     } else {
         print("Not recording.")

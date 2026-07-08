@@ -8,8 +8,12 @@ let package = Package(
         .macOS("15.0")
     ],
     targets: [
+        // Capture engine + shared helpers, used by both the CLI and RecBar.
+        .target(name: "RecCore", path: "Sources/RecCore"),
+
         .executableTarget(
             name: "rec",
+            dependencies: ["RecCore"],
             path: "Sources/rec",
             exclude: ["Info.plist"],
             linkerSettings: [
@@ -22,6 +26,14 @@ let package = Package(
                     "-Xlinker", "Sources/rec/Info.plist",
                 ])
             ]
-        )
+        ),
+
+        // Menu bar app; `make app` wraps this binary into RecBar.app.
+        .executableTarget(
+            name: "RecBar",
+            dependencies: ["RecCore"],
+            path: "Sources/RecBar",
+            exclude: ["Info.plist"]
+        ),
     ]
 )

@@ -4,9 +4,9 @@ import CoreMedia
 import Foundation
 import ScreenCaptureKit
 
-struct RecError: Error, CustomStringConvertible {
-    let description: String
-    init(_ message: String) { description = message }
+public struct RecError: Error, CustomStringConvertible {
+    public let description: String
+    public init(_ message: String) { description = message }
 }
 
 /// SCStream requires its delegate at init time, before our Recorder exists,
@@ -19,9 +19,9 @@ private final class StreamDelegateProxy: NSObject, SCStreamDelegate {
 /// Captures the main display + system audio + microphone via a single SCStream
 /// and writes them into one .mov with three separate tracks (video, system
 /// audio, mic). Audio is never mixed, so each track can be transcribed alone.
-final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
-    let outputURL: URL
-    let audioOnly: Bool
+public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
+    public let outputURL: URL
+    public let audioOnly: Bool
 
     private let stream: SCStream
     private let streamDelegate = StreamDelegateProxy()
@@ -39,9 +39,9 @@ final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
 
     /// Called (once) if the stream dies on its own, e.g. the display sleeps
     /// or permission is revoked mid-recording.
-    var onStreamStopped: ((Error?) -> Void)?
+    public var onStreamStopped: ((Error?) -> Void)?
 
-    init(outputURL: URL, audioOnly: Bool = false) async throws {
+    public init(outputURL: URL, audioOnly: Bool = false) async throws {
         self.outputURL = outputURL
         self.audioOnly = audioOnly
 
@@ -137,7 +137,7 @@ final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
         try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: queue)
     }
 
-    func start() async throws {
+    public func start() async throws {
         guard writer.startWriting() else {
             throw RecError("Could not start writing: \(writer.error?.localizedDescription ?? "unknown")")
         }
@@ -147,7 +147,7 @@ final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
 
     /// Stops capture and finalizes the file. Safe to call exactly once;
     /// callers guard against double-invocation.
-    func stopAndFinish() async throws {
+    public func stopAndFinish() async throws {
         try? await stream.stopCapture()
         queue.sync { finished = true }  // drain in-flight samples, then close the gate
 
@@ -167,11 +167,11 @@ final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
         }
     }
 
-    var elapsed: TimeInterval { startDate.map { Date().timeIntervalSince($0) } ?? 0 }
+    public var elapsed: TimeInterval { startDate.map { Date().timeIntervalSince($0) } ?? 0 }
 
     // MARK: - SCStreamOutput
 
-    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
+    public func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
                 of type: SCStreamOutputType) {
         guard !finished, sampleBuffer.isValid, CMSampleBufferDataIsReady(sampleBuffer) else { return }
 
