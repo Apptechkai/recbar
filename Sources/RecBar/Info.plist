@@ -16,8 +16,8 @@
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
     <string>15.0</string>
-    <key>LSUIElement</key>
-    <true/>
+    <key>CFBundleIconFile</key>
+    <string>RecBar</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>RecBar records your microphone as a separate audio track in meeting recordings.</string>
 </dict>

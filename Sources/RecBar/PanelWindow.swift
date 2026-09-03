@@ -32,13 +32,17 @@ final class PanelWindow {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         HotKey.register()  // ⌃⌥R → show panel
+        Task { @MainActor in PanelWindow.shared.show() }  // Dock launch → panel
     }
 
-    /// Called when the user "opens" RecBar while it's already running.
+    /// Called when the user clicks the Dock icon while RecBar is running.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         Task { @MainActor in PanelWindow.shared.show() }
         return false
     }
+
+    /// Closing the panel must not quit — recording continues in the background.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }
 
 /// Global hotkey via Carbon — works without Accessibility permission, unlike

@@ -21,9 +21,10 @@ uninstall:
 
 app: build
 	rm -rf $(APP)
-	mkdir -p $(APP)/Contents/MacOS
+	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources
 	install .build/release/RecBar $(APP)/Contents/MacOS/RecBar
 	cp Sources/RecBar/Info.plist $(APP)/Contents/Info.plist
+	cp Resources/RecBar.icns $(APP)/Contents/Resources/RecBar.icns
 	codesign --force -s "$(SIGN)" $(APP)
 
 install-app: app

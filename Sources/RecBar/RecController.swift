@@ -113,10 +113,13 @@ final class RecController: ObservableObject {
         PidFile.write()
         isRecording = true
         elapsedText = "00:00:00"
+        NSApp.dockTile.badgeLabel = "REC"  // visible in the Dock even with the panel closed
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, let recorder = self.recorder else { return }
                 self.elapsedText = formatDuration(recorder.elapsed)
+                let minutes = Int(recorder.elapsed) / 60
+                NSApp.dockTile.badgeLabel = minutes > 0 ? "REC \(minutes)m" : "REC"
             }
         }
     }
@@ -139,6 +142,7 @@ final class RecController: ObservableObject {
         PidFile.remove()
         isRecording = false
         previewImage = nil
+        NSApp.dockTile.badgeLabel = nil
         if finalizeError == nil {
             lastRecordingURL = recorder.outputURL
         }
