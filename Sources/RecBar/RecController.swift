@@ -9,6 +9,8 @@ import RecCore
 /// stop a RecBar recording and vice versa.
 @MainActor
 final class RecController: ObservableObject {
+    static let shared = RecController()
+
     @Published private(set) var isRecording = false
     @Published private(set) var elapsedText = "00:00:00"
     @Published var audioOnly = false

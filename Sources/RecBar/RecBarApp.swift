@@ -4,8 +4,9 @@ import SwiftUI
 
 @main
 struct RecBarApp: App {
-    @StateObject private var controller = RecController()
-    @StateObject private var transcriber = Transcriber()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @ObservedObject private var controller = RecController.shared
+    @ObservedObject private var transcriber = Transcriber.shared
 
     private var icon: String {
         if controller.isRecording { return "record.circle.fill" }

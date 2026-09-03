@@ -10,6 +10,8 @@ import UniformTypeIdentifiers
 /// assumed to be rec-cli recordings and get [Them]/[Me] speaker labels.
 @MainActor
 final class Transcriber: ObservableObject {
+    static let shared = Transcriber()
+
     @Published private(set) var isBusy = false
     @Published private(set) var statusText = ""
     @Published private(set) var fraction: Double?  // nil = indeterminate

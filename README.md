@@ -91,6 +91,11 @@ dock icon — nothing on screen while presenting. It shares the CLI's pidfile,
 so `rec stop` in a terminal also stops a RecBar recording, and the two can
 never double-record.
 
+**Can't see the icon?** A crowded menu bar hides it (macOS drops overflow
+items silently). Two icon-free ways to the same panel: open RecBar again from
+Spotlight while it's running, or press **⌃⌥R** anywhere — either shows the
+panel as a small floating window.
+
 RecBar needs its own one-time permission grant (Screen & System Audio
 Recording + Microphone → *RecBar*). macOS ties that grant to the app's code
 signature, so an ad-hoc-signed build loses it on every rebuild. The Makefile
