@@ -12,7 +12,17 @@ final class RecController: ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var elapsedText = "00:00:00"
     @Published var audioOnly = false
+    @Published var normalizeAudio = true
     @Published private(set) var lastRecordingURL: URL?
+
+    /// Capture source: 0 (kCGNullWindowID) = entire display, else a window id.
+    @Published var selectedWindowID: CGWindowID = 0
+    @Published private(set) var windows: [CaptureWindow] = []
+    @Published private(set) var sourceLabel = "Entire display"
+
+    /// After Stop: loudness normalization in progress (Start stays disabled).
+    @Published private(set) var isFinalizing = false
+    @Published private(set) var finalizeFraction: Double?
 
     private var recorder: Recorder?
     private var timer: Timer?
@@ -29,8 +39,18 @@ final class RecController: ObservableObject {
         sigintSource = source
     }
 
-    func start() async {
+    /// Refresh the window list for the source picker. Silently empty until
+    /// screen-recording permission is granted (listing needs it too).
+    func refreshWindows() async {
         guard !isRecording else { return }
+        windows = (try? await Recorder.availableWindows()) ?? []
+        if selectedWindowID != 0, !windows.contains(where: { $0.id == selectedWindowID }) {
+            selectedWindowID = 0
+        }
+    }
+
+    func start() async {
+        guard !isRecording, !isFinalizing else { return }
         if let pid = PidFile.runningPID(),
            pid != ProcessInfo.processInfo.processIdentifier {
             alert("Another recording is already running (pid \(pid)).",
@@ -39,11 +59,23 @@ final class RecController: ObservableObject {
         }
         guard await ensurePermissions() else { return }
 
+        var source: CaptureSource = .display
+        if selectedWindowID != 0 {
+            guard let window = windows.first(where: { $0.id == selectedWindowID }) else {
+                alert("The selected window is gone.", detail: "Pick a source again.")
+                await refreshWindows()
+                return
+            }
+            source = .window(window)
+        }
+        sourceLabel = { if case .window(let w) = source { return w.label } else { return "Entire display" } }()
+
         let outputURL = RecPaths.defaultOutputURL(audioOnly: audioOnly)
         do {
             try FileManager.default.createDirectory(
                 at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let newRecorder = try await Recorder(outputURL: outputURL, audioOnly: audioOnly)
+            let newRecorder = try await Recorder(outputURL: outputURL, audioOnly: audioOnly,
+                                                 source: source)
             newRecorder.onStreamStopped = { [weak self] error in
                 Task { @MainActor in
                     await self?.stop(streamError: error?.localizedDescription ?? "unknown reason")
@@ -80,10 +112,26 @@ final class RecController: ObservableObject {
             finalizeError = "\(error)"
         }
 
+        // Pidfile goes first so `rec stop` returns as soon as the file is
+        // safe, while normalization keeps running here.
         PidFile.remove()
         isRecording = false
         if finalizeError == nil {
             lastRecordingURL = recorder.outputURL
+        }
+
+        if finalizeError == nil, normalizeAudio {
+            isFinalizing = true
+            finalizeFraction = nil
+            do {
+                try await AudioNormalizer.normalize(fileURL: recorder.outputURL) { [weak self] fraction in
+                    Task { @MainActor in self?.finalizeFraction = fraction }
+                }
+            } catch {
+                alert("Audio normalization skipped.", detail: "\(error)")
+            }
+            isFinalizing = false
+            finalizeFraction = nil
         }
 
         if let finalizeError {

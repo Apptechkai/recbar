@@ -16,12 +16,49 @@ private final class StreamDelegateProxy: NSObject, SCStreamDelegate {
     func stream(_ stream: SCStream, didStopWithError error: Error) { onStop?(error) }
 }
 
-/// Captures the main display + system audio + microphone via a single SCStream
-/// and writes them into one .mov with three separate tracks (video, system
-/// audio, mic). Audio is never mixed, so each track can be transcribed alone.
+/// A capturable on-screen window, as listed by `Recorder.availableWindows()`.
+public struct CaptureWindow: Identifiable, Hashable, Sendable {
+    public let id: CGWindowID
+    public let title: String
+    public let appName: String
+    public let frame: CGRect
+
+    public var label: String { title.isEmpty ? appName : "\(appName) — \(title)" }
+}
+
+/// What to capture: the whole main display, or one window. Window capture
+/// also narrows system audio to just the app that owns the window, so other
+/// apps' sounds stay out of the recording.
+public enum CaptureSource: Sendable {
+    case display
+    case window(CaptureWindow)
+}
+
+/// Captures the main display (or one window) + system audio + microphone via
+/// a single SCStream and writes them into one .mov with three separate tracks
+/// (video, system audio, mic). Audio is never mixed, so each track can be
+/// transcribed alone.
 public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
     public let outputURL: URL
     public let audioOnly: Bool
+    public let source: CaptureSource
+
+    /// On-screen windows worth offering as capture targets (real app windows
+    /// with a size, skipping menu bar items, overlays and tiny helpers).
+    public static func availableWindows() async throws -> [CaptureWindow] {
+        let content = try await SCShareableContent.excludingDesktopWindows(
+            true, onScreenWindowsOnly: true)
+        return content.windows.compactMap { window in
+            guard let app = window.owningApplication,
+                  window.windowLayer == 0,
+                  window.frame.width >= 200, window.frame.height >= 150,
+                  app.bundleIdentifier != Bundle.main.bundleIdentifier
+            else { return nil }
+            return CaptureWindow(id: window.windowID, title: window.title ?? "",
+                                 appName: app.applicationName, frame: window.frame)
+        }
+        .sorted { $0.frame.width * $0.frame.height > $1.frame.width * $1.frame.height }
+    }
 
     private let stream: SCStream
     private let streamDelegate = StreamDelegateProxy()
@@ -41,9 +78,11 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
     /// or permission is revoked mid-recording.
     public var onStreamStopped: ((Error?) -> Void)?
 
-    public init(outputURL: URL, audioOnly: Bool = false) async throws {
+    public init(outputURL: URL, audioOnly: Bool = false,
+                source: CaptureSource = .display) async throws {
         self.outputURL = outputURL
         self.audioOnly = audioOnly
+        self.source = source
 
         // -- Pick the main display ------------------------------------------
         let content = try await SCShareableContent.excludingDesktopWindows(
@@ -58,8 +97,26 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
         // SCDisplay reports points; ask CoreGraphics for real pixel size so
         // Retina text stays sharp.
         let mode = CGDisplayCopyDisplayMode(display.displayID)
-        let pixelWidth = mode?.pixelWidth ?? display.width
-        let pixelHeight = mode?.pixelHeight ?? display.height
+        let scale = Double(mode?.pixelWidth ?? display.width) / Double(display.width)
+
+        // -- Content filter + output size -----------------------------------
+        let filter: SCContentFilter
+        let pixelWidth: Int
+        let pixelHeight: Int
+        switch source {
+        case .display:
+            filter = SCContentFilter(display: display, excludingWindows: [])
+            pixelWidth = mode?.pixelWidth ?? display.width
+            pixelHeight = mode?.pixelHeight ?? display.height
+        case .window(let target):
+            guard let window = content.windows.first(where: { $0.windowID == target.id }) else {
+                throw RecError("Window \"\(target.label)\" is no longer available.")
+            }
+            filter = SCContentFilter(desktopIndependentWindow: window)
+            // HEVC needs even dimensions.
+            pixelWidth = max(2, Int(window.frame.width * scale) & ~1)
+            pixelHeight = max(2, Int(window.frame.height * scale) & ~1)
+        }
 
         // -- Stream configuration -------------------------------------------
         let config = SCStreamConfiguration()
@@ -85,7 +142,6 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
         config.captureMicrophone = true        // macOS 15+: mic straight from SCK
         config.microphoneCaptureDeviceID = nil // default input device
 
-        let filter = SCContentFilter(display: display, excludingWindows: [])
         stream = SCStream(filter: filter, configuration: config, delegate: streamDelegate)
 
         // -- Asset writer: 1 video + 2 audio inputs -------------------------

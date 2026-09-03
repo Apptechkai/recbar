@@ -42,12 +42,32 @@ struct PanelView: View {
     private var recordingSection: some View {
         Group {
             if controller.isRecording {
-                HStack {
-                    Image(systemName: "record.circle.fill").foregroundStyle(.red)
-                    Text("Recording — \(controller.elapsedText)").monospacedDigit()
-                    Spacer()
-                    Button("Stop") { Task { await controller.stop() } }
-                        .keyboardShortcut(.defaultAction)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Image(systemName: "record.circle.fill").foregroundStyle(.red)
+                        Text("Recording — \(controller.elapsedText)").monospacedDigit()
+                        Spacer()
+                        Button("Stop") { Task { await controller.stop() } }
+                            .keyboardShortcut(.defaultAction)
+                    }
+                    Text(controller.sourceLabel)
+                        .font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+            } else if controller.isFinalizing {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Normalizing audio loudness…")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let fraction = controller.finalizeFraction {
+                        HStack(spacing: 8) {
+                            ProgressView(value: fraction)
+                            Text("\(Int(fraction * 100))%")
+                                .font(.caption).monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        ProgressView().progressViewStyle(.linear)
+                    }
                 }
             } else {
                 VStack(alignment: .leading, spacing: 8) {
@@ -56,9 +76,34 @@ struct PanelView: View {
                     } label: {
                         Label("Start Recording", systemImage: "record.circle")
                     }
+                    HStack(spacing: 6) {
+                        Picker("Source", selection: $controller.selectedWindowID) {
+                            Text("Entire display").tag(CGWindowID(0))
+                            if !controller.windows.isEmpty {
+                                Divider()
+                                ForEach(controller.windows) { window in
+                                    Text(window.label).lineLimit(1).tag(window.id)
+                                }
+                            }
+                        }
+                        Button {
+                            Task { await controller.refreshWindows() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .controlSize(.small)
+                        .help("Refresh window list")
+                    }
+                    if controller.selectedWindowID != 0 {
+                        Text("Window capture also limits system audio to that app.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
                     Toggle("Audio only (no video)", isOn: $controller.audioOnly)
                         .toggleStyle(.checkbox)
+                    Toggle("Normalize audio loudness on stop", isOn: $controller.normalizeAudio)
+                        .toggleStyle(.checkbox)
                 }
+                .task { await controller.refreshWindows() }
             }
         }
     }

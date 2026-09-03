@@ -49,6 +49,29 @@ rec status                      # is a recording running?
 rec stop                        # stop cleanly from another terminal
 ```
 
+### Recording one window instead of the whole display
+
+```sh
+rec windows                      # list capturable windows
+rec start --window "Meet"        # first window whose title/app contains "Meet"
+rec start -w "Google Chrome"     # or match by app name
+```
+
+Window capture has a useful side effect: ScreenCaptureKit limits **system
+audio to the app that owns the window**, so Slack pings, Spotify, and other
+apps stay out of the meeting track. A Chrome *tab* is not its own window —
+drag the tab out into a separate window first if you want to capture just it.
+RecBar has the same choice in its "Source" picker.
+
+### Audio loudness normalization
+
+Meeting audio arrives quiet and uneven, which sounds "muddy" on playback. On
+stop, both audio tracks are normalized to a standard loudness (EBU R128,
+−16 LUFS, via ffmpeg `loudnorm`); video is stream-copied so it's fast and
+lossless for the picture. `rec stop` returns as soon as the file is safe;
+normalization continues afterwards. Opt out with `--no-normalize` (CLI) or the
+checkbox in RecBar. Needs `brew install ffmpeg`.
+
 `--audio-only` (or `-a`) drops the video track but keeps the same two separate
 audio tracks. System audio means **everything the Mac plays** — Chrome, VLC,
 Spotify, any app — so it also works as a plain audio grabber. Note that macOS

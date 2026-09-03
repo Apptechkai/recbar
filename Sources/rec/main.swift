@@ -14,8 +14,14 @@ func usage() -> Never {
                                into one .mov with 3 separate tracks.
                                Default output: ~/Movies/recordings/rec-<timestamp>.mov
                                Stop with Ctrl+C, or `rec stop` from another terminal.
-        --audio-only | -a      Skip the screen: record just system audio + mic
+        --window <text>  | -w  Record one window instead of the display: the
+                               first on-screen window whose app name or title
+                               contains <text> (case-insensitive). System audio
+                               is then limited to that app.
+        --audio-only     | -a  Skip the screen: record just system audio + mic
                                (still 2 separate tracks, ~115 MB/hour).
+        --no-normalize         Skip the loudness normalization that runs on stop.
+      rec windows              List windows you can pass to --window.
       rec stop                 Cleanly stop a recording started elsewhere.
       rec status               Show whether a recording is running.
     """)
@@ -82,7 +88,42 @@ func ensurePermissions() async {
 
 // MARK: - Subcommands
 
-func commandStart(outputPath: String?, audioOnly: Bool) async {
+func commandWindows() async {
+    await ensurePermissions()
+    let windows: [CaptureWindow]
+    do {
+        windows = try await Recorder.availableWindows()
+    } catch {
+        fail("Could not list windows: \(error)")
+    }
+    if windows.isEmpty {
+        print("No capturable windows on screen.")
+        return
+    }
+    for window in windows {
+        print("  \(window.label)  [\(Int(window.frame.width))×\(Int(window.frame.height))]")
+    }
+    print("\nUse: rec start --window \"<part of app name or title>\"")
+}
+
+func resolveWindow(matching query: String) async -> CaptureWindow {
+    let windows: [CaptureWindow]
+    do {
+        windows = try await Recorder.availableWindows()
+    } catch {
+        fail("Could not list windows: \(error)")
+    }
+    let needle = query.lowercased()
+    // Prefer a title match (e.g. the meeting tab), then app name; both
+    // lists are largest-window-first.
+    if let match = windows.first(where: { $0.title.lowercased().contains(needle) })
+        ?? windows.first(where: { $0.appName.lowercased().contains(needle) }) {
+        return match
+    }
+    fail("No on-screen window matches \"\(query)\". Run `rec windows` to see the list.")
+}
+
+func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?, normalize: Bool) async {
     if let pid = PidFile.runningPID() {
         fail("A recording is already running (pid \(pid)). Stop it with `rec stop`.")
     }
@@ -105,9 +146,14 @@ func commandStart(outputPath: String?, audioOnly: Bool) async {
 
     await ensurePermissions()
 
+    var source: CaptureSource = .display
+    if let windowQuery {
+        source = .window(await resolveWindow(matching: windowQuery))
+    }
+
     let recorder: Recorder
     do {
-        recorder = try await Recorder(outputURL: outputURL, audioOnly: audioOnly)
+        recorder = try await Recorder(outputURL: outputURL, audioOnly: audioOnly, source: source)
         try await recorder.start()
     } catch {
         fail("Could not start capture: \(error)")
@@ -116,6 +162,9 @@ func commandStart(outputPath: String?, audioOnly: Bool) async {
     PidFile.write()
 
     print("● Recording\(audioOnly ? " (audio only)" : "")  →  \(outputURL.path)")
+    if case .window(let window) = source {
+        print("  source: window \"\(window.label)\" — system audio limited to \(window.appName)")
+    }
     if audioOnly {
         print("  system audio (track 1) + mic (track 2), no video, no on-screen UI")
     } else {
@@ -159,9 +208,36 @@ func commandStart(outputPath: String?, audioOnly: Bool) async {
     } catch {
         fail("\(error)")
     }
+    // File is safe now; release the pidfile so `rec stop` returns promptly
+    // even though normalization may run for a minute on long meetings.
+    PidFile.remove()
+
+    if normalize {
+        print("  normalizing audio loudness…")
+        let lastShown = LockedValue(-1)
+        do {
+            try await AudioNormalizer.normalize(fileURL: outputURL) { fraction in
+                let percent = Int(fraction * 100) / 10 * 10
+                if lastShown.exchange(percent) != percent { print("  … \(percent)%") }
+            }
+        } catch {
+            print("  ⚠︎ \(error) — original audio kept")
+        }
+    }
 
     print("✔ Saved \(outputURL.path)  (\(formatDuration(recorder.elapsed)), \(fileSizeString(outputURL)))")
     exit(0)
+}
+
+/// Tiny lock-protected box for state touched from ffmpeg's reader thread.
+final class LockedValue: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Int
+    init(_ value: Int) { self.value = value }
+    func exchange(_ new: Int) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        let old = value; value = new; return old
+    }
 }
 
 func commandStop() {
@@ -198,8 +274,19 @@ case "start":
     var rest = Array(arguments.dropFirst())
     let audioOnly = rest.contains("--audio-only") || rest.contains("-a")
     rest.removeAll { $0 == "--audio-only" || $0 == "-a" }
+    let normalize = !rest.contains("--no-normalize")
+    rest.removeAll { $0 == "--no-normalize" }
+    var windowQuery: String?
+    if let flagIndex = rest.firstIndex(where: { $0 == "--window" || $0 == "-w" }) {
+        guard flagIndex + 1 < rest.count else { usage() }
+        windowQuery = rest[flagIndex + 1]
+        rest.removeSubrange(flagIndex...(flagIndex + 1))
+    }
     if rest.count > 1 { usage() }
-    await commandStart(outputPath: rest.first, audioOnly: audioOnly)
+    await commandStart(outputPath: rest.first, audioOnly: audioOnly,
+                       windowQuery: windowQuery, normalize: normalize)
+case "windows":
+    await commandWindows()
 case "stop":
     commandStop()
 case "status":
