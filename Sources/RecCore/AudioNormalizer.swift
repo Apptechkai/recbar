@@ -42,8 +42,13 @@ public enum AudioNormalizer {
         var filters: [String] = []
         for (index, _) in audioTracks.enumerated() {
             let chain = index == 1 ? micChain : systemChain
-            let measured = try await measure(ffmpeg: ffmpeg, file: fileURL, track: index, chain: chain)
-            filters.append("\(chain),loudnorm=\(loudnormTarget):\(measured):linear=true")
+            if let measured = try await measure(ffmpeg: ffmpeg, file: fileURL, track: index, chain: chain) {
+                filters.append("\(chain),loudnorm=\(loudnormTarget):\(measured):linear=true")
+            } else {
+                // Silent track (e.g. window capture of an app that played no
+                // sound): nothing to normalize, just run the clean-up chain.
+                filters.append(chain)
+            }
             progress?(0.3 * Double(index + 1) / Double(audioTracks.count))
         }
 
@@ -81,8 +86,9 @@ public enum AudioNormalizer {
     }
 
     /// First loudnorm pass: returns the `measured_*` parameters for a linear
-    /// second pass.
-    private static func measure(ffmpeg: String, file: URL, track: Int, chain: String) async throws -> String {
+    /// second pass, or nil if the track is (near-)silent and shouldn't be
+    /// normalized at all (loudnorm reports -inf, which pass 2 rejects).
+    private static func measure(ffmpeg: String, file: URL, track: Int, chain: String) async throws -> String? {
         let result = try await runFFmpeg(ffmpeg, [
             "-v", "info", "-nostats", "-i", file.path, "-map", "0:a:\(track)",
             "-af", "\(chain),loudnorm=\(loudnormTarget):print_format=json", "-f", "null", "-",
@@ -91,12 +97,21 @@ public enum AudioNormalizer {
               let open = result.stderr.range(of: "{", options: .backwards),
               let close = result.stderr.range(of: "}", range: open.upperBound..<result.stderr.endIndex),
               let json = try? JSONSerialization.jsonObject(
-                with: Data(result.stderr[open.lowerBound...close.upperBound].utf8)) as? [String: Any],
-              let i = json["input_i"], let tp = json["input_tp"], let lra = json["input_lra"],
-              let thresh = json["input_thresh"], let offset = json["target_offset"]
+                with: Data(result.stderr[open.lowerBound...close.upperBound].utf8)) as? [String: Any]
         else {
             throw RecError("loudness measurement failed on track \(track + 1): \(result.stderr.suffix(200))")
         }
+        // ffmpeg prints numbers as strings, and "-inf" for silence.
+        func number(_ key: String) -> Double? {
+            let value = json[key]
+            if let d = value as? Double { return d.isFinite ? d : nil }
+            if let s = value as? String, let d = Double(s), d.isFinite { return d }
+            return nil
+        }
+        guard let i = number("input_i"), i > -70,
+              let tp = number("input_tp"), let lra = number("input_lra"),
+              let thresh = number("input_thresh"), let offset = number("target_offset")
+        else { return nil }
         return "measured_I=\(i):measured_TP=\(tp):measured_LRA=\(lra):measured_thresh=\(thresh):offset=\(offset)"
     }
 

@@ -28,6 +28,8 @@ func usage() -> Never {
                                (the once-a-minute status line always shows them).
       rec windows              List windows you can pass to --window.
       rec mics                 List microphones you can pass to --mic.
+      rec normalize <file>     Run the audio clean-up + normalization on an
+                               existing recording, in place.
       rec stop                 Cleanly stop a recording started elsewhere.
       rec status               Show whether a recording is running.
     """)
@@ -309,6 +311,24 @@ func commandStop() {
     fail("Recorder (pid \(pid)) is still running — check its terminal for errors.")
 }
 
+func commandNormalize(path: String) async {
+    let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+    guard FileManager.default.fileExists(atPath: url.path) else {
+        fail("No such file: \(url.path)")
+    }
+    print("Cleaning up + normalizing audio in \(url.lastPathComponent)…")
+    let lastShown = LockedValue(-1)
+    do {
+        try await AudioNormalizer.normalize(fileURL: url) { fraction in
+            let percent = Int(fraction * 100) / 10 * 10
+            if lastShown.exchange(percent) != percent { print("  … \(percent)%") }
+        }
+    } catch {
+        fail("\(error)")
+    }
+    print("✔ Done  (\(fileSizeString(url)))")
+}
+
 func commandStatus() {
     if let pid = PidFile.runningPID() {
         print("● Recording in progress (pid \(pid)).")
@@ -346,6 +366,9 @@ case "windows":
     await commandWindows()
 case "mics":
     commandMics()
+case "normalize":
+    guard arguments.count == 2 else { usage() }
+    await commandNormalize(path: arguments[1])
 case "stop":
     commandStop()
 case "status":

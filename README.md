@@ -84,7 +84,14 @@ normalization to −16 LUFS (single-pass `loudnorm` pumps the noise floor up
 between words). Video is stream-copied, so the picture is untouched and it
 takes roughly a minute per hour of recording. `rec stop` returns as soon as the
 file is safe; processing continues afterwards. Opt out with `--no-normalize`
-(CLI) or the checkbox in RecBar. Needs `brew install ffmpeg`.
+(CLI) or the checkbox in RecBar. Needs `brew install ffmpeg`. A silent track
+(e.g. window capture of an app that never played sound) is left as is.
+
+Older or skipped recordings can be processed later, in place:
+
+```sh
+rec normalize ~/Movies/recordings/rec-2026-08-31-140227.mov
+```
 
 What it can't fix: participants' audio is band-limited by the meeting app
 before it ever reaches your Mac, and a distant mic stays a distant mic.
