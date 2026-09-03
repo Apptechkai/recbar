@@ -54,6 +54,20 @@ struct PanelView: View {
                     Text(controller.sourceLabel)
                         .font(.caption).foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle)
+                    // Live preview of the frames being written — proof the
+                    // right window is being captured.
+                    if let preview = controller.previewImage {
+                        Image(decorative: preview, scale: 1)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 170)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
+                    } else if !controller.audioOnly {
+                        Text("Waiting for first frame…")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
                 }
             } else if controller.isFinalizing {
                 VStack(alignment: .leading, spacing: 4) {

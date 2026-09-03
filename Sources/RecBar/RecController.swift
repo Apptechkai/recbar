@@ -21,6 +21,8 @@ final class RecController: ObservableObject {
     @Published var selectedWindowID: CGWindowID = 0
     @Published private(set) var windows: [CaptureWindow] = []
     @Published private(set) var sourceLabel = "Entire display"
+    /// Live thumbnail of what's being written to disk (nil in audio-only mode).
+    @Published private(set) var previewImage: CGImage?
 
     /// After Stop: loudness normalization in progress (Start stays disabled).
     @Published private(set) var isFinalizing = false
@@ -93,6 +95,9 @@ final class RecController: ObservableObject {
                 at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             let newRecorder = try await Recorder(outputURL: outputURL, audioOnly: audioOnly,
                                                  source: source)
+            newRecorder.onPreviewFrame = { [weak self] image in
+                Task { @MainActor in self?.previewImage = image }
+            }
             newRecorder.onStreamStopped = { [weak self] error in
                 Task { @MainActor in
                     await self?.stop(streamError: error?.localizedDescription ?? "unknown reason")
@@ -133,6 +138,7 @@ final class RecController: ObservableObject {
         // safe, while normalization keeps running here.
         PidFile.remove()
         isRecording = false
+        previewImage = nil
         if finalizeError == nil {
             lastRecordingURL = recorder.outputURL
         }

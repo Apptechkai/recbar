@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreGraphics
+import CoreImage
 import CoreMedia
 import Foundation
 import ScreenCaptureKit
@@ -77,6 +78,13 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
     /// Called (once) if the stream dies on its own, e.g. the display sleeps
     /// or permission is revoked mid-recording.
     public var onStreamStopped: ((Error?) -> Void)?
+
+    /// Receives a small snapshot (≈320 px wide) of the frames being written,
+    /// about once per second — a "you're recording the right thing" preview.
+    /// Called on the capture queue.
+    public var onPreviewFrame: ((CGImage) -> Void)?
+    private var lastPreviewTime = CMTime.zero
+    private let previewContext = CIContext(options: [.cacheIntermediates: false])
 
     public init(outputURL: URL, audioOnly: Bool = false,
                 source: CaptureSource = .display) async throws {
@@ -245,6 +253,7 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
             // three tracks share one timeline with no black lead-in.
             startSessionIfNeeded(at: sampleBuffer)
             append(sampleBuffer, to: videoInput)
+            emitPreviewIfDue(sampleBuffer)
 
         case .audio:
             if audioOnly { startSessionIfNeeded(at: sampleBuffer) }
@@ -258,6 +267,21 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
 
         @unknown default:
             break
+        }
+    }
+
+    private func emitPreviewIfDue(_ sampleBuffer: CMSampleBuffer) {
+        guard let onPreviewFrame,
+              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        let now = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        guard lastPreviewTime == .zero || CMTimeSubtract(now, lastPreviewTime).seconds >= 1 else { return }
+        lastPreviewTime = now
+
+        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        let scale = min(1, 320 / image.extent.width)
+        let small = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        if let cgImage = previewContext.createCGImage(small, from: small.extent) {
+            onPreviewFrame(cgImage)
         }
     }
 
