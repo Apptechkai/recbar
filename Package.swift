@@ -4,8 +4,9 @@ import PackageDescription
 let package = Package(
     name: "rec",
     platforms: [
-        // captureMicrophone on SCStreamConfiguration needs macOS 15+
-        .macOS("15.0")
+        // captureMicrophone needs macOS 15; SCContentFilter.includedWindows
+        // (used to label picker selections) needs 15.2.
+        .macOS("15.2")
     ],
     targets: [
         // Capture engine + shared helpers, used by both the CLI and RecBar.

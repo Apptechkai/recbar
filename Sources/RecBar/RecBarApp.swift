@@ -103,27 +103,50 @@ struct PanelView: View {
                     } label: {
                         Label("Start Recording", systemImage: "record.circle")
                     }
-                    HStack(spacing: 6) {
-                        Picker("Record:", selection: $controller.selectedWindowID) {
-                            Text("Entire display").tag(CGWindowID(0))
-                            ForEach(controller.windows) { window in
-                                Text(window.label).lineLimit(1).tag(window.id)
+                    if let picked = controller.pickedLabel {
+                        // Visually picked source replaces the dropdown until cleared.
+                        HStack(spacing: 6) {
+                            Text("Record:").font(.body)
+                            Label(picked, systemImage: "checkmark.rectangle")
+                                .lineLimit(1).truncationMode(.middle)
+                            Spacer()
+                            Button {
+                                controller.clearPickedSource()
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
                             }
+                            .buttonStyle(.plain).foregroundStyle(.secondary)
+                            .help("Back to the dropdown")
                         }
-                        Button {
-                            Task { await controller.refreshWindows(requestPermission: true) }
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
+                    } else {
+                        HStack(spacing: 6) {
+                            Picker("Record:", selection: $controller.selectedWindowID) {
+                                Text("Entire display").tag(CGWindowID(0))
+                                ForEach(controller.windows) { window in
+                                    Text(window.label).lineLimit(1).tag(window.id)
+                                }
+                            }
+                            Button {
+                                Task { await controller.refreshWindows(requestPermission: true) }
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            .controlSize(.small)
+                            .help("Refresh window list")
                         }
-                        .controlSize(.small)
-                        .help("Refresh window list")
                     }
+                    Button {
+                        controller.pickSourceVisually()
+                    } label: {
+                        Label("Choose visually (thumbnails)…", systemImage: "rectangle.grid.2x2")
+                    }
+                    .controlSize(.small)
                     if let hint = controller.windowsHint {
                         Text(hint)
                             .font(.caption2).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                    } else if controller.selectedWindowID != 0 {
-                        Text("Window capture also limits system audio to that app.")
+                    } else if controller.selectedWindowID != 0 || controller.pickedLabel != nil {
+                        Text("Window/app capture also limits system audio to that app.")
                             .font(.caption2).foregroundStyle(.secondary)
                     } else {
                         Text("\(controller.windows.count) windows available — pick one to record just that app.")

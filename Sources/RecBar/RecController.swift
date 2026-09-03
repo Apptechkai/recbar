@@ -3,6 +3,7 @@ import AVFoundation
 import CoreGraphics
 import Foundation
 import RecCore
+import ScreenCaptureKit
 
 /// Owns the recording lifecycle for the menu bar app. Same engine as the CLI
 /// (RecCore.Recorder) and the same pidfile, so `rec stop` in a terminal can
@@ -19,6 +20,22 @@ final class RecController: ObservableObject {
 
     /// Capture source: 0 (kCGNullWindowID) = entire display, else a window id.
     @Published var selectedWindowID: CGWindowID = 0
+    /// A source chosen in the system thumbnail picker; overrides the dropdown.
+    @Published private(set) var pickedFilter: SCContentFilter?
+    @Published private(set) var pickedLabel: String?
+
+    func pickSourceVisually() {
+        ContentPicker.shared.pick { [weak self] filter in
+            guard let self, let filter else { return }
+            self.pickedFilter = filter
+            self.pickedLabel = filter.recDescription
+        }
+    }
+
+    func clearPickedSource() {
+        pickedFilter = nil
+        pickedLabel = nil
+    }
     @Published private(set) var windows: [CaptureWindow] = []
     @Published private(set) var sourceLabel = "Entire display"
 
@@ -103,7 +120,9 @@ final class RecController: ObservableObject {
         guard await ensurePermissions() else { return }
 
         var source: CaptureSource = .display
-        if selectedWindowID != 0 {
+        if let pickedFilter {
+            source = .filter(pickedFilter, label: pickedLabel ?? "Selected content")
+        } else if selectedWindowID != 0 {
             guard let window = windows.first(where: { $0.id == selectedWindowID }) else {
                 alert("The selected window is gone.", detail: "Pick a source again.")
                 await refreshWindows()
@@ -111,7 +130,7 @@ final class RecController: ObservableObject {
             }
             source = .window(window)
         }
-        sourceLabel = { if case .window(let w) = source { return w.label } else { return "Entire display" } }()
+        sourceLabel = source.label
 
         let outputURL = RecPaths.defaultOutputURL(audioOnly: audioOnly)
         do {

@@ -40,9 +40,41 @@ public struct CaptureMicrophone: Identifiable, Hashable, Sendable {
 /// What to capture: the whole main display, or one window. Window capture
 /// also narrows system audio to just the app that owns the window, so other
 /// apps' sounds stay out of the recording.
-public enum CaptureSource: Sendable {
+public enum CaptureSource {
     case display
     case window(CaptureWindow)
+    /// A filter chosen in the system content picker (window, app, or display).
+    case filter(SCContentFilter, label: String)
+
+    public var label: String {
+        switch self {
+        case .display: return "Entire display"
+        case .window(let window): return window.label
+        case .filter(_, let label): return label
+        }
+    }
+}
+
+extension SCContentFilter {
+    /// Human-readable description of what a picker-chosen filter captures.
+    public var recDescription: String {
+        switch style {
+        case .display:
+            return "Entire display"
+        case .window:
+            if let window = includedWindows.first {
+                let app = window.owningApplication?.applicationName ?? "Window"
+                let title = window.title ?? ""
+                return title.isEmpty ? app : "\(app) — \(title)"
+            }
+            return "Window"
+        case .application:
+            let names = includedApplications.map(\.applicationName)
+            return names.isEmpty ? "Application" : names.joined(separator: ", ") + " (all windows)"
+        default:
+            return "Selected content"
+        }
+    }
 }
 
 /// Captures the main display (or one window) + system audio + microphone via
@@ -154,6 +186,11 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
             // HEVC needs even dimensions.
             pixelWidth = max(2, Int(window.frame.width * scale) & ~1)
             pixelHeight = max(2, Int(window.frame.height * scale) & ~1)
+        case .filter(let picked, _):
+            filter = picked
+            let pickedScale = Double(picked.pointPixelScale)
+            pixelWidth = max(2, Int(picked.contentRect.width * pickedScale) & ~1)
+            pixelHeight = max(2, Int(picked.contentRect.height * pickedScale) & ~1)
         }
 
         // -- Stream configuration -------------------------------------------
