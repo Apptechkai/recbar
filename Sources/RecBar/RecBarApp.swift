@@ -77,25 +77,29 @@ struct PanelView: View {
                         Label("Start Recording", systemImage: "record.circle")
                     }
                     HStack(spacing: 6) {
-                        Picker("Source", selection: $controller.selectedWindowID) {
+                        Picker("Record:", selection: $controller.selectedWindowID) {
                             Text("Entire display").tag(CGWindowID(0))
-                            if !controller.windows.isEmpty {
-                                Divider()
-                                ForEach(controller.windows) { window in
-                                    Text(window.label).lineLimit(1).tag(window.id)
-                                }
+                            ForEach(controller.windows) { window in
+                                Text(window.label).lineLimit(1).tag(window.id)
                             }
                         }
                         Button {
-                            Task { await controller.refreshWindows() }
+                            Task { await controller.refreshWindows(requestPermission: true) }
                         } label: {
                             Image(systemName: "arrow.clockwise")
                         }
                         .controlSize(.small)
                         .help("Refresh window list")
                     }
-                    if controller.selectedWindowID != 0 {
+                    if let hint = controller.windowsHint {
+                        Text(hint)
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if controller.selectedWindowID != 0 {
                         Text("Window capture also limits system audio to that app.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    } else {
+                        Text("\(controller.windows.count) windows available — pick one to record just that app.")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                     Toggle("Audio only (no video)", isOn: $controller.audioOnly)
@@ -104,6 +108,7 @@ struct PanelView: View {
                         .toggleStyle(.checkbox)
                 }
                 .task { await controller.refreshWindows() }
+                .onAppear { Task { await controller.refreshWindows() } }
             }
         }
     }

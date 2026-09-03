@@ -39,11 +39,26 @@ final class RecController: ObservableObject {
         sigintSource = source
     }
 
-    /// Refresh the window list for the source picker. Silently empty until
-    /// screen-recording permission is granted (listing needs it too).
-    func refreshWindows() async {
+    /// Why the window list is empty, if it is (shown under the picker).
+    @Published private(set) var windowsHint: String?
+
+    /// Refresh the window list for the source picker. Listing windows needs
+    /// Screen Recording permission, same as capturing.
+    func refreshWindows(requestPermission: Bool = false) async {
         guard !isRecording else { return }
-        windows = (try? await Recorder.availableWindows()) ?? []
+        if !CGPreflightScreenCaptureAccess() {
+            if requestPermission { CGRequestScreenCaptureAccess() }
+            windows = []
+            windowsHint = "Grant Screen & System Audio Recording to RecBar in System Settings → Privacy & Security, then relaunch RecBar."
+            return
+        }
+        do {
+            windows = try await Recorder.availableWindows()
+            windowsHint = windows.isEmpty ? "No app windows on screen right now." : nil
+        } catch {
+            windows = []
+            windowsHint = "Couldn't list windows: \(error.localizedDescription)"
+        }
         if selectedWindowID != 0, !windows.contains(where: { $0.id == selectedWindowID }) {
             selectedWindowID = 0
         }
