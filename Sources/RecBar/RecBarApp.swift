@@ -71,7 +71,7 @@ struct PanelView: View {
                 }
             } else if controller.isFinalizing {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Normalizing audio loudness…")
+                    Text("Cleaning up + normalizing audio…")
                         .font(.caption).foregroundStyle(.secondary)
                     if let fraction = controller.finalizeFraction {
                         HStack(spacing: 8) {
@@ -117,9 +117,16 @@ struct PanelView: View {
                         Text("\(controller.windows.count) windows available — pick one to record just that app.")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
+                    Picker("Mic:", selection: $controller.selectedMicID) {
+                        Text("System default\(controller.microphones.first.map { " (\($0.name))" } ?? "")")
+                            .tag("")
+                        ForEach(controller.microphones) { mic in
+                            Text(mic.name).tag(mic.id)
+                        }
+                    }
                     Toggle("Audio only (no video)", isOn: $controller.audioOnly)
                         .toggleStyle(.checkbox)
-                    Toggle("Normalize audio loudness on stop", isOn: $controller.normalizeAudio)
+                    Toggle("Clean up + normalize audio on stop", isOn: $controller.normalizeAudio)
                         .toggleStyle(.checkbox)
                 }
                 .task { await controller.refreshWindows() }

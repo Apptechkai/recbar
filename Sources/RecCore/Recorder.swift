@@ -27,6 +27,12 @@ public struct CaptureWindow: Identifiable, Hashable, Sendable {
     public var label: String { title.isEmpty ? appName : "\(appName) — \(title)" }
 }
 
+/// An audio input device selectable for the mic track.
+public struct CaptureMicrophone: Identifiable, Hashable, Sendable {
+    public let id: String      // AVCaptureDevice.uniqueID, as SCK expects
+    public let name: String
+}
+
 /// What to capture: the whole main display, or one window. Window capture
 /// also narrows system audio to just the app that owns the window, so other
 /// apps' sounds stay out of the recording.
@@ -43,6 +49,18 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
     public let outputURL: URL
     public let audioOnly: Bool
     public let source: CaptureSource
+    public let microphone: CaptureMicrophone?
+
+    /// Microphones available right now (built-in, USB, AirPods…), with the
+    /// system default input first.
+    public static func availableMicrophones() -> [CaptureMicrophone] {
+        let session = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.microphone, .external], mediaType: .audio, position: .unspecified)
+        let defaultID = AVCaptureDevice.default(for: .audio)?.uniqueID
+        return session.devices
+            .map { CaptureMicrophone(id: $0.uniqueID, name: $0.localizedName) }
+            .sorted { ($0.id == defaultID ? 0 : 1) < ($1.id == defaultID ? 0 : 1) }
+    }
 
     /// On-screen windows worth offering as capture targets (real app windows
     /// with a size, skipping menu bar items, overlays and tiny helpers).
@@ -87,10 +105,12 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
     private let previewContext = CIContext(options: [.cacheIntermediates: false])
 
     public init(outputURL: URL, audioOnly: Bool = false,
-                source: CaptureSource = .display) async throws {
+                source: CaptureSource = .display,
+                microphone: CaptureMicrophone? = nil) async throws {
         self.outputURL = outputURL
         self.audioOnly = audioOnly
         self.source = source
+        self.microphone = microphone
 
         // -- Pick the main display ------------------------------------------
         let content = try await SCShareableContent.excludingDesktopWindows(
@@ -148,7 +168,7 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
         config.excludesCurrentProcessAudio = true
 
         config.captureMicrophone = true        // macOS 15+: mic straight from SCK
-        config.microphoneCaptureDeviceID = nil // default input device
+        config.microphoneCaptureDeviceID = microphone?.id  // nil = system default input
 
         stream = SCStream(filter: filter, configuration: config, delegate: streamDelegate)
 

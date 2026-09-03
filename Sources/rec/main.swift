@@ -18,10 +18,14 @@ func usage() -> Never {
                                first on-screen window whose app name or title
                                contains <text> (case-insensitive). System audio
                                is then limited to that app.
+        --mic <text>     | -m  Use the microphone whose name contains <text>
+                               (e.g. "AirPods") instead of the system default.
         --audio-only     | -a  Skip the screen: record just system audio + mic
                                (still 2 separate tracks, ~115 MB/hour).
-        --no-normalize         Skip the loudness normalization that runs on stop.
+        --no-normalize         Skip the speech clean-up + loudness normalization
+                               that runs on stop.
       rec windows              List windows you can pass to --window.
+      rec mics                 List microphones you can pass to --mic.
       rec stop                 Cleanly stop a recording started elsewhere.
       rec status               Show whether a recording is running.
     """)
@@ -123,7 +127,28 @@ func resolveWindow(matching query: String) async -> CaptureWindow {
     fail("No on-screen window matches \"\(query)\". Run `rec windows` to see the list.")
 }
 
-func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?, normalize: Bool) async {
+func commandMics() {
+    let mics = Recorder.availableMicrophones()
+    if mics.isEmpty {
+        print("No microphones found.")
+        return
+    }
+    for (index, mic) in mics.enumerated() {
+        print("  \(mic.name)\(index == 0 ? "  (system default)" : "")")
+    }
+    print("\nUse: rec start --mic \"<part of the name>\"")
+}
+
+func resolveMicrophone(matching query: String) -> CaptureMicrophone {
+    let needle = query.lowercased()
+    if let match = Recorder.availableMicrophones().first(where: { $0.name.lowercased().contains(needle) }) {
+        return match
+    }
+    fail("No microphone matches \"\(query)\". Run `rec mics` to see the list.")
+}
+
+func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?,
+                  micQuery: String?, normalize: Bool) async {
     if let pid = PidFile.runningPID() {
         fail("A recording is already running (pid \(pid)). Stop it with `rec stop`.")
     }
@@ -150,10 +175,12 @@ func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?, no
     if let windowQuery {
         source = .window(await resolveWindow(matching: windowQuery))
     }
+    let microphone = micQuery.map(resolveMicrophone(matching:))
 
     let recorder: Recorder
     do {
-        recorder = try await Recorder(outputURL: outputURL, audioOnly: audioOnly, source: source)
+        recorder = try await Recorder(outputURL: outputURL, audioOnly: audioOnly,
+                                      source: source, microphone: microphone)
         try await recorder.start()
     } catch {
         fail("Could not start capture: \(error)")
@@ -165,6 +192,7 @@ func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?, no
     if case .window(let window) = source {
         print("  source: window \"\(window.label)\" — system audio limited to \(window.appName)")
     }
+    print("  mic: \(microphone?.name ?? (Recorder.availableMicrophones().first?.name ?? "system default"))")
     if audioOnly {
         print("  system audio (track 1) + mic (track 2), no video, no on-screen UI")
     } else {
@@ -213,7 +241,7 @@ func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?, no
     PidFile.remove()
 
     if normalize {
-        print("  normalizing audio loudness…")
+        print("  cleaning up + normalizing audio…")
         let lastShown = LockedValue(-1)
         do {
             try await AudioNormalizer.normalize(fileURL: outputURL) { fraction in
@@ -276,17 +304,22 @@ case "start":
     rest.removeAll { $0 == "--audio-only" || $0 == "-a" }
     let normalize = !rest.contains("--no-normalize")
     rest.removeAll { $0 == "--no-normalize" }
-    var windowQuery: String?
-    if let flagIndex = rest.firstIndex(where: { $0 == "--window" || $0 == "-w" }) {
+    func takeValue(_ long: String, _ short: String) -> String? {
+        guard let flagIndex = rest.firstIndex(where: { $0 == long || $0 == short }) else { return nil }
         guard flagIndex + 1 < rest.count else { usage() }
-        windowQuery = rest[flagIndex + 1]
+        let value = rest[flagIndex + 1]
         rest.removeSubrange(flagIndex...(flagIndex + 1))
+        return value
     }
+    let windowQuery = takeValue("--window", "-w")
+    let micQuery = takeValue("--mic", "-m")
     if rest.count > 1 { usage() }
     await commandStart(outputPath: rest.first, audioOnly: audioOnly,
-                       windowQuery: windowQuery, normalize: normalize)
+                       windowQuery: windowQuery, micQuery: micQuery, normalize: normalize)
 case "windows":
     await commandWindows()
+case "mics":
+    commandMics()
 case "stop":
     commandStop()
 case "status":

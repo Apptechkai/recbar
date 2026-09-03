@@ -21,6 +21,10 @@ final class RecController: ObservableObject {
     @Published var selectedWindowID: CGWindowID = 0
     @Published private(set) var windows: [CaptureWindow] = []
     @Published private(set) var sourceLabel = "Entire display"
+
+    /// Mic: "" = system default input, else an AVCaptureDevice uniqueID.
+    @Published var selectedMicID: String = ""
+    @Published private(set) var microphones: [CaptureMicrophone] = []
     /// Live thumbnail of what's being written to disk (nil in audio-only mode).
     @Published private(set) var previewImage: CGImage?
 
@@ -50,6 +54,10 @@ final class RecController: ObservableObject {
     /// Screen Recording permission, same as capturing.
     func refreshWindows(requestPermission: Bool = false) async {
         guard !isRecording else { return }
+        microphones = Recorder.availableMicrophones()
+        if selectedMicID != "", !microphones.contains(where: { $0.id == selectedMicID }) {
+            selectedMicID = ""  // e.g. AirPods went away
+        }
         if !CGPreflightScreenCaptureAccess() {
             if requestPermission { CGRequestScreenCaptureAccess() }
             windows = []
@@ -93,8 +101,9 @@ final class RecController: ObservableObject {
         do {
             try FileManager.default.createDirectory(
                 at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let microphone = microphones.first { $0.id == selectedMicID }
             let newRecorder = try await Recorder(outputURL: outputURL, audioOnly: audioOnly,
-                                                 source: source)
+                                                 source: source, microphone: microphone)
             newRecorder.onPreviewFrame = { [weak self] image in
                 Task { @MainActor in self?.previewImage = image }
             }

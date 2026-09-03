@@ -63,14 +63,31 @@ apps stay out of the meeting track. A Chrome *tab* is not its own window —
 drag the tab out into a separate window first if you want to capture just it.
 RecBar has the same choice in its "Source" picker.
 
-### Audio loudness normalization
+### Choosing the microphone
 
-Meeting audio arrives quiet and uneven, which sounds "muddy" on playback. On
-stop, both audio tracks are normalized to a standard loudness (EBU R128,
-−16 LUFS, via ffmpeg `loudnorm`); video is stream-copied so it's fast and
-lossless for the picture. `rec stop` returns as soon as the file is safe;
-normalization continues afterwards. Opt out with `--no-normalize` (CLI) or the
-checkbox in RecBar. Needs `brew install ffmpeg`.
+```sh
+rec mics                         # list inputs (system default first)
+rec start --mic "AirPods"        # record the mic track from a specific input
+```
+
+The recorder follows the system default input unless told otherwise; RecBar
+has a "Mic:" picker. This matters more than any processing: a headset or
+AirPods close to your mouth gives a full-band, room-free voice track that a
+desk-distance mic (e.g. Studio Display) cannot.
+
+### Audio clean-up + loudness normalization
+
+Meeting audio arrives quiet, uneven and noisy. On stop, each audio track gets
+a podcast-style chain — high-pass, spectral denoise, a small presence lift on
+the mic track, gentle compression — then a two-pass *linear* EBU R128
+normalization to −16 LUFS (single-pass `loudnorm` pumps the noise floor up
+between words). Video is stream-copied, so the picture is untouched and it
+takes roughly a minute per hour of recording. `rec stop` returns as soon as the
+file is safe; processing continues afterwards. Opt out with `--no-normalize`
+(CLI) or the checkbox in RecBar. Needs `brew install ffmpeg`.
+
+What it can't fix: participants' audio is band-limited by the meeting app
+before it ever reaches your Mac, and a distant mic stays a distant mic.
 
 `--audio-only` (or `-a`) drops the video track but keeps the same two separate
 audio tracks. System audio means **everything the Mac plays** — Chrome, VLC,
