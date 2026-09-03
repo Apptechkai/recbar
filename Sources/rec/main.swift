@@ -31,6 +31,10 @@ func usage() -> Never {
       rec mics                 List microphones you can pass to --mic.
       rec normalize <file>     Run the audio clean-up + normalization on an
                                existing recording, in place.
+      rec transcribe <file>    Write <file>.srt next to the file using a local
+                               WhisperKit model (downloaded on first use).
+        --translate            Translate speech to English instead of
+                               transcribing it as spoken.
       rec stop                 Cleanly stop a recording started elsewhere.
       rec status               Show whether a recording is running.
     """)
@@ -330,6 +334,33 @@ func commandNormalize(path: String) async {
     print("✔ Done  (\(fileSizeString(url)))")
 }
 
+func commandTranscribe(path: String, translate: Bool) async {
+    let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+    guard FileManager.default.fileExists(atPath: url.path) else {
+        fail("No such file: \(url.path)")
+    }
+    let job = TranscriptionJob(input: url, translateToEnglish: translate)
+    let lastShown = LockedValue(-1)
+    job.onStatus = { text in print("  \(text)") }
+    job.onProgress = { value in
+        guard let value else { return }
+        let percent = Int(value * 100) / 10 * 10
+        if lastShown.exchange(percent) != percent { print("  … \(percent)%") }
+    }
+    signal(SIGINT, SIG_IGN)
+    let sigint = DispatchSource.makeSignalSource(signal: SIGINT, queue: DispatchQueue(label: "rec.transcribe.sigint"))
+    sigint.setEventHandler { job.cancel() }
+    sigint.resume()
+    do {
+        let srt = try await job.run()
+        print("✔ Wrote \(srt.path)")
+    } catch is CancellationError {
+        fail("Cancelled.")
+    } catch {
+        fail("\(error)")
+    }
+}
+
 func commandStatus() {
     if let pid = PidFile.runningPID() {
         print("● Recording in progress (pid \(pid)).")
@@ -370,6 +401,12 @@ case "mics":
 case "normalize":
     guard arguments.count == 2 else { usage() }
     await commandNormalize(path: arguments[1])
+case "transcribe":
+    var rest = Array(arguments.dropFirst())
+    let translate = rest.contains("--translate")
+    rest.removeAll { $0 == "--translate" }
+    guard rest.count == 1 else { usage() }
+    await commandTranscribe(path: rest[0], translate: translate)
 case "thumbs":
     // Undocumented: dump picker thumbnails as PNGs into a directory (self-test
     // for the SourceCatalog thumbnail path RecBar's picker relies on).

@@ -1,0 +1,20 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Build (release)
+        run: swift build -c release
+      - name: Package RecBar.app (ad-hoc signed)
+        run: make app SIGN=-
+      - name: Smoke test CLI
+        run: .build/release/rec 2>&1 | head -3 || true

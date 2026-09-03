@@ -1,5 +1,6 @@
 .build/
 .swiftpm/
 RecBar.app/
+dist/
 *.mov
 .DS_Store

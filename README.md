@@ -1,206 +1,177 @@
-# rec — headless meeting recorder for macOS
+<p align="center">
+  <img src="docs/icon.png" width="128" alt="RecBar icon">
+</p>
 
-Terminal-only screen recorder for meetings. No overlay, no floating toolbar,
-no on-screen UI of any kind — just the macOS purple menu-bar dot, which is
-system-enforced and unavoidable. Built on ScreenCaptureKit, so system audio is
-captured natively (no BlackHole / loopback drivers).
+<h1 align="center">RecBar</h1>
 
-Each recording is **one `.mov` with three separate tracks**:
+<p align="center">
+  <strong>Headless meeting recorder for macOS.</strong><br>
+  Records your screen, the meeting audio, and your microphone as <em>separate tracks</em> —
+  no bot in the call, no overlay on your screen, nothing uploaded anywhere.
+</p>
 
-| Track | Contents | Codec |
-|---|---|---|
-| Video | Main display, full resolution | HEVC ~4 Mbps (≈1.8 GB/hour) |
-| Audio 1 | System audio — the meeting participants (Chrome, etc.) | AAC 48 kHz stereo |
-| Audio 2 | Microphone — your voice | AAC 48 kHz mono |
+<p align="center">
+  <a href="https://github.com/<you>/recbar/actions"><img src="https://github.com/<you>/recbar/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+  <img src="https://img.shields.io/badge/macOS-15.2%2B-blue" alt="macOS 15.2+">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT">
+</p>
 
-The audio is deliberately **never mixed**, so each side of the conversation can
-be transcribed independently (e.g. whisper.cpp per track).
+---
 
-## Requirements
+Most meeting recorders either send a bot into your call, upload your audio to
+someone's cloud, or draw a toolbar over the screen you're presenting. RecBar
+does none of that. It sits in the Dock (or runs from a terminal), captures
+what you tell it to via Apple's ScreenCaptureKit, and writes one `.mov`:
 
-- macOS 15+ (uses ScreenCaptureKit's direct microphone capture)
-- Xcode Command Line Tools (`xcode-select --install`) to build
+| Track   | Contents                                    | Codec                       |
+| ------- | ------------------------------------------- | --------------------------- |
+| Video   | Display, one window, or all windows of an app | HEVC ~4 Mbps (≈1.8 GB/hour) |
+| Audio 1 | System audio — the other participants       | AAC 48 kHz stereo           |
+| Audio 2 | Microphone — you                            | AAC 48 kHz mono             |
 
-## Build & install
+The two audio tracks are **never mixed**. That's the whole point: each side of
+the conversation can be transcribed on its own, so "who said what" is exact
+instead of guessed by a diarization model.
+
+## Features
+
+- **Capture what you choose** — the whole display, a single window, or an
+  entire app. Window/app capture also **limits the recorded audio to that app**,
+  so Slack pings and Spotify stay out of the meeting track.
+- **Invisible while you present** — no floating toolbar, no countdown, no
+  frame. Only macOS's own purple recording indicator (unavoidable).
+- **Dock icon with a REC badge**, live level meters for mic and system audio,
+  a live thumbnail of what's being captured, and a **"no mic signal" warning**
+  so you never finish a meeting to find your side missing.
+- **Thumbnail source picker** (Window / App / Entire screen), plus a global
+  hotkey (⌃⌥R) and a terminal-controllable CLI: `rec start`, `rec stop`.
+- **Crash-resilient files** — written in 5-second fragments, so a force-quit
+  or kernel panic mid-meeting still leaves a playable recording.
+- **Audio clean-up on stop** — denoise, gentle compression, two-pass EBU R128
+  loudness normalization. Video is stream-copied, never re-encoded.
+- **Local transcription to `.srt`** with WhisperKit (large-v3 on the Neural
+  Engine), speaker-labeled `[Me]` / `[Them]`; optional translate-to-English.
+- **Microphone picker** — use your AirPods or headset without changing the
+  system default.
+- **Nothing leaves your Mac.** No account, no telemetry, no network calls
+  (other than the one-time model download for transcription, if you opt in).
+
+<p align="center">
+  <img src="docs/panel.png" width="360" alt="RecBar panel">
+</p>
+
+## Install
+
+**Homebrew** (builds from source, no Gatekeeper prompt):
 
 ```sh
-make install PREFIX=/opt/homebrew/bin   # already on PATH on Apple Silicon
-# default PREFIX is ~/bin: make install
+brew tap <you>/recbar
+brew install recbar
+cp -R "$(brew --prefix)/opt/recbar/RecBar.app" /Applications/
 ```
 
-## First run — permissions
+**Download:** a signed, notarized `RecBar.app` and the `rec` binary are on the
+[Releases](https://github.com/<you>/recbar/releases) page.
 
-macOS attributes a CLI tool's permissions to the **terminal app that launches
-it**. On first run `rec` will trigger the system prompts; grant in
-**System Settings → Privacy & Security**:
-
-- **Screen & System Audio Recording** → enable your terminal (Terminal / iTerm / Ghostty …)
-- **Microphone** → enable your terminal
-
-Then quit and reopen the terminal and run `rec start` again.
-
-## Usage
+**From source:**
 
 ```sh
-rec start                       # record to ~/Movies/recordings/rec-<timestamp>.mov
-rec start ~/Desktop/demo.mov    # record to a specific file
-rec start --audio-only          # no video: just system audio + mic (~115 MB/hour)
-rec status                      # is a recording running?
-rec stop                        # stop cleanly from another terminal
+git clone https://github.com/<you>/recbar && cd recbar
+make install PREFIX=/opt/homebrew/bin   # the `rec` CLI
+make install-app                        # RecBar.app → /Applications
 ```
 
-### Recording one window instead of the whole display
+Requirements: macOS 15.2 or newer, Apple silicon or Intel. Optional runtime
+tools via Homebrew: `ffmpeg` (audio clean-up) and `whisperkit-cli`
+(transcription). Recording itself needs nothing extra.
+
+### First run: permissions
+
+macOS will ask for **Screen & System Audio Recording** and **Microphone**.
+Grant both to *RecBar* (and to your terminal app if you use `rec`) in
+System Settings → Privacy & Security, then relaunch. This happens once.
+
+## Using RecBar
+
+Click the Dock icon or press **⌃⌥R** to open the panel:
+
+1. **Record:** — pick the entire display, a window from the dropdown, or
+   *Choose from thumbnails…* for the visual picker. For meetings, the **App**
+   tab (e.g. *Google Chrome*) is the easiest: every Chrome window, audio limited
+   to Chrome.
+2. **Mic:** — leave on system default or pick a headset.
+3. **Start Recording.** The panel shows elapsed time, level meters, and a live
+   thumbnail; the Dock badge reads REC. Close the panel if you like —
+   recording continues.
+4. **Stop.** Audio clean-up runs (about a minute per hour of recording), then
+   the file is in `~/Movies/recordings/`.
+
+**Transcribe:** *Transcribe File to Subtitles…* → pick any video/audio file →
+a `.srt` appears next to it, with a live progress bar. RecBar recordings get
+`[Me]` / `[Them]` labels.
+
+## Using the CLI
 
 ```sh
-rec windows                      # list capturable windows
-rec start --window "Meet"        # first window whose title/app contains "Meet"
-rec start -w "Google Chrome"     # or match by app name
+rec start                          # main display + system audio + mic
+rec start --window "Meet"          # one window (title or app name substring)
+rec start --mic "AirPods"          # choose the microphone
+rec start --audio-only             # no video, ~115 MB/hour
+rec start --meter                  # print mic/audio levels every second
+rec stop                           # from another terminal (or Ctrl+C)
+rec status
+rec windows                        # list capturable windows
+rec mics                           # list microphones
+rec normalize meeting.mov          # audio clean-up on an existing file, in place
+rec transcribe meeting.mov         # → meeting.srt (add --translate for English)
 ```
 
-Window capture has a useful side effect: ScreenCaptureKit limits **system
-audio to the app that owns the window**, so Slack pings, Spotify, and other
-apps stay out of the meeting track. A Chrome *tab* is not its own window —
-drag the tab out into a separate window first if you want to capture just it.
-RecBar has the same choice in its "Record:" dropdown, plus **Choose from
-thumbnails…** — a Chrome-style picker with live previews and app icons, in
-three tabs: **Window**, **App** (all of an app's windows, audio limited to that
-app — the easiest choice for meetings), and **Entire screen**. Click a card to
-select, double-click or press Select to confirm.
+Default output: `~/Movies/recordings/rec-YYYY-MM-DD-HHmmss.mov`. Both
+`Ctrl+C` and `rec stop` finalize the file cleanly.
 
-### Choosing the microphone
+## Working with the tracks
 
 ```sh
-rec mics                         # list inputs (system default first)
-rec start --mic "AirPods"        # record the mic track from a specific input
-```
-
-The recorder follows the system default input unless told otherwise; RecBar
-has a "Mic:" picker. This matters more than any processing: a headset or
-AirPods close to your mouth gives a full-band, room-free voice track that a
-desk-distance mic (e.g. Studio Display) cannot.
-
-### Audio clean-up + loudness normalization
-
-Meeting audio arrives quiet, uneven and noisy. On stop, each audio track gets
-a podcast-style chain — high-pass, spectral denoise, a small presence lift on
-the mic track, gentle compression — then a two-pass *linear* EBU R128
-normalization to −16 LUFS (single-pass `loudnorm` pumps the noise floor up
-between words). Video is stream-copied, so the picture is untouched and it
-takes roughly a minute per hour of recording. `rec stop` returns as soon as the
-file is safe; processing continues afterwards. Opt out with `--no-normalize`
-(CLI) or the checkbox in RecBar. Needs `brew install ffmpeg`. A silent track
-(e.g. window capture of an app that never played sound) is left as is.
-
-Older or skipped recordings can be processed later, in place:
-
-```sh
-rec normalize ~/Movies/recordings/rec-2026-08-31-140227.mov
-```
-
-What it can't fix: participants' audio is band-limited by the meeting app
-before it ever reaches your Mac, and a distant mic stays a distant mic.
-
-`--audio-only` (or `-a`) drops the video track but keeps the same two separate
-audio tracks. System audio means **everything the Mac plays** — Chrome, VLC,
-Spotify, any app — so it also works as a plain audio grabber. Note that macOS
-gates system-audio capture behind the same "Screen & System Audio Recording"
-permission even when no video is recorded.
-
-Stop with **Ctrl+C** in the recording terminal, or `rec stop` from anywhere.
-Both paths finalize the file properly. The file is also written in 5-second
-fragments, so even a hard crash mid-meeting leaves a recoverable recording.
-
-## RecBar — menu bar app
-
-A minimal menu bar UI over the same engine: `make install-app` builds
-`RecBar.app` into /Applications. The ◉ icon gives Start/Stop, an audio-only
-toggle, elapsed time, and quick access to the recordings folder. No window, no
-dock icon — nothing on screen while presenting. It shares the CLI's pidfile,
-so `rec stop` in a terminal also stops a RecBar recording, and the two can
-never double-record.
-
-**Can't see the icon?** A crowded menu bar hides it (macOS drops overflow
-items silently). Two icon-free ways to the same panel: open RecBar again from
-Spotlight / click its Dock icon while it's running, or press **⌃⌥R** anywhere
-— either shows the panel as a small window. By default the window hides when
-you click into another app; tick **Keep window on top** to pin it.
-
-While recording, the panel shows what's actually being captured: a live
-thumbnail of the video frames, and **live level meters for the mic and the
-system audio**, computed from the same samples being written to disk. A
-"no mic signal" warning appears if the mic goes digitally silent for 3 s —
-usually a muted or wrong microphone. The CLI shows the same levels in its
-status line (`--meter` for once a second).
-
-RecBar needs its own one-time permission grant (Screen & System Audio
-Recording + Microphone → *RecBar*). macOS ties that grant to the app's code
-signature, so an ad-hoc-signed build loses it on every rebuild. The Makefile
-therefore signs with a self-signed "RecBar Dev" certificate if one exists in
-the login keychain (no trust-store changes needed — `codesign` accepts it and
-the resulting designated requirement is stable). To create one:
-
-```sh
-openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=RecBar Dev" \
-  -addext "keyUsage=critical,digitalSignature" \
-  -addext "extendedKeyUsage=critical,codeSigning" -keyout key.pem -out cert.pem
-openssl pkcs12 -export -legacy -inkey key.pem -in cert.pem -name "RecBar Dev" \
-  -out recbar-dev.p12 -passout pass:x
-security import recbar-dev.p12 -k ~/Library/Keychains/login.keychain-db -P x \
-  -T /usr/bin/codesign && rm key.pem recbar-dev.p12
-```
-
-(`-legacy` matters: macOS can't read OpenSSL 3's default PKCS12 format.)
-
-## Transcribe to subtitles (RecBar)
-
-RecBar's panel has **Transcribe File to Subtitles…** — pick any video/audio
-file and it writes a `.srt` next to it, with a live progress bar. Runs fully
-local via `whisperkit-cli` (brew) using the WhisperKit models MacWhisper has
-already downloaded (large-v3 preferred). Files with exactly two audio tracks
-(rec-cli recordings) get speaker-labeled cues: `[Them]` = system audio,
-`[Me]` = mic.
-
-**Translate to English** uses whisper's built-in translate task: any spoken
-language → English subtitles, still offline. (Other target languages need an
-external translation step — not built.)
-
-Requires: `brew install whisperkit-cli ffmpeg` and at least one WhisperKit
-model downloaded via MacWhisper.
-
-## Hearing what you recorded (multi-track playback)
-
-The tracks are separate **by design**, which trips up players:
-
-- **QuickTime Player** mixes all tracks — you hear both sides at once.
-- **VLC** plays only ONE audio track at a time and defaults to track 1 (system
-  audio). Your voice is on track 2: Audio → Audio Track → Track 2.
-- To listen to one side alone: `ffmpeg -i meeting.mov -map 0:a:1 me.wav`
-
-Also remember track 1 is digital silence unless the Mac was actually playing
-sound — in a mic-only test the "movie" can sound silent in VLC even though the
-mic track is fine.
-
-## Splitting the tracks afterwards
-
-```sh
+# split the sides for your own transcription / summary pipeline
 ffmpeg -i meeting.mov -map 0:a:0 them.wav -map 0:a:1 me.wav
 ```
 
 `0:a:0` = system audio (participants), `0:a:1` = microphone (you).
 
-## Design notes
+Multi-track playback varies by player: **QuickTime** mixes both tracks;
+**VLC** plays one at a time (Audio → Audio Track → Track 2 for the mic). A
+recording made with nothing playing on the Mac has a silent track 1 — that's
+expected, not a bug.
 
-- **One SCStream, one AVAssetWriter.** ScreenCaptureKit delivers screen frames,
-  system audio, and mic on a single stream (mic capture is native on macOS 15+),
-  and all three share the host clock — so the tracks stay in sync without any
-  manual timestamp juggling.
-- The writer session is anchored to the first complete video frame, so there is
-  no black lead-in and audio/video start together.
-- `rec stop` works by sending SIGINT to the recording process (found via
-  `/tmp/rec-cli.pid`) — exactly the same clean-shutdown path as Ctrl+C.
+## What it can't do
 
-## Future direction (not built yet)
+- Make meeting audio sound better than the meeting app sent it (Meet, Teams,
+  and Zoom compress voices heavily). The clean-up step helps; it can't add
+  what was never there.
+- Make a desk-distance microphone sound close. A headset or AirPods on the
+  mic picker helps far more than any processing.
+- Record a single browser *tab*. Tabs aren't windows — drag the tab out into
+  its own window, or capture the whole browser app.
+- Run on Windows or Linux. It's built on ScreenCaptureKit.
 
-Per-track transcription: split tracks → whisper.cpp per speaker side → merge
-transcripts → Claude summary → Obsidian. The unmixed-track layout above exists
-to make this trivial.
+## How it works
+
+One `SCStream` delivers screen frames, system audio, and the microphone
+(native mic capture is a macOS 15 ScreenCaptureKit feature) on a shared clock,
+into one `AVAssetWriter` with three inputs — which is why the tracks stay in
+sync without any timestamp juggling. `RecCore` holds all of that plus the
+source catalog, audio processing, and transcription, with no UI; `rec` and
+`RecBar` are thin front ends over it. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Privacy
+
+RecBar makes no network requests. Recordings and transcripts stay in
+`~/Movies/recordings/` (or wherever you point it). The only download is the
+WhisperKit model the first time you transcribe, and only if you use that
+feature. Please check your local laws and let participants know when you
+record a conversation.
+
+## License
+
+[MIT](LICENSE). Built by [Kai](https://github.com/<you>) at
+[AppTech System](https://apptechsystem.com.sg).

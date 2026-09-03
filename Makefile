@@ -35,6 +35,25 @@ install-app: app
 uninstall-app:
 	rm -rf /Applications/$(APP)
 
+# --- Release ----------------------------------------------------------------
+# One-time setup for notarization (needs an Apple Developer ID):
+#   xcrun notarytool store-credentials "RecBar" --apple-id you@example.com \
+#       --team-id TEAMID --password <app-specific-password>
+# Then:  make release SIGN="Developer ID Application: Your Name (TEAMID)"
+VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo dev)
+NOTARY_PROFILE ?= RecBar
+DIST = dist
+
+release: app
+	rm -rf $(DIST) && mkdir -p $(DIST)
+	codesign --force --options runtime --timestamp -s "$(SIGN)" $(APP)
+	ditto -c -k --keepParent $(APP) $(DIST)/RecBar-$(VERSION).zip
+	xcrun notarytool submit $(DIST)/RecBar-$(VERSION).zip --keychain-profile "$(NOTARY_PROFILE)" --wait
+	xcrun stapler staple $(APP)
+	ditto -c -k --keepParent $(APP) $(DIST)/RecBar-$(VERSION).zip
+	install .build/release/rec $(DIST)/rec
+	@echo "Release artifacts in $(DIST)/"
+
 clean:
 	swift package clean
-	rm -rf $(APP)
+	rm -rf $(APP) $(DIST)
