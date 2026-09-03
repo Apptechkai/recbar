@@ -1,8 +1,10 @@
 PREFIX ?= $(HOME)/bin
 APP = RecBar.app
-# Ad-hoc signing by default. With a real identity the TCC grant survives
-# rebuilds: make app SIGN="Developer ID Application: Your Name (TEAMID)"
-SIGN ?= -
+# Signing identity. A stable identity (even a self-signed "RecBar Dev" cert
+# in the login keychain) keeps the Screen Recording / Microphone grants across
+# rebuilds; ad-hoc ("-") signing loses them every build. Auto-detects the
+# self-signed cert; override with SIGN="Developer ID Application: ...".
+SIGN ?= $(shell security find-identity -p codesigning 2>/dev/null | grep -q '"RecBar Dev"' && echo "RecBar Dev" || echo "-")
 
 .PHONY: build install uninstall app install-app uninstall-app clean
 

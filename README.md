@@ -92,9 +92,23 @@ so `rec stop` in a terminal also stops a RecBar recording, and the two can
 never double-record.
 
 RecBar needs its own one-time permission grant (Screen & System Audio
-Recording + Microphone → *RecBar*). Note: with the default ad-hoc signing,
-macOS forgets that grant every time you rebuild the app; sign with a real
-identity to keep it (`make app SIGN="Developer ID Application: …"`).
+Recording + Microphone → *RecBar*). macOS ties that grant to the app's code
+signature, so an ad-hoc-signed build loses it on every rebuild. The Makefile
+therefore signs with a self-signed "RecBar Dev" certificate if one exists in
+the login keychain (no trust-store changes needed — `codesign` accepts it and
+the resulting designated requirement is stable). To create one:
+
+```sh
+openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=RecBar Dev" \
+  -addext "keyUsage=critical,digitalSignature" \
+  -addext "extendedKeyUsage=critical,codeSigning" -keyout key.pem -out cert.pem
+openssl pkcs12 -export -legacy -inkey key.pem -in cert.pem -name "RecBar Dev" \
+  -out recbar-dev.p12 -passout pass:x
+security import recbar-dev.p12 -k ~/Library/Keychains/login.keychain-db -P x \
+  -T /usr/bin/codesign && rm key.pem recbar-dev.p12
+```
+
+(`-legacy` matters: macOS can't read OpenSSL 3's default PKCS12 format.)
 
 ## Transcribe to subtitles (RecBar)
 
