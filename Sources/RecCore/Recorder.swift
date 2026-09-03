@@ -27,6 +27,10 @@ public struct CaptureWindow: Identifiable, Hashable, Sendable {
     public var label: String { title.isEmpty ? appName : "\(appName) — \(title)" }
 }
 
+public enum AudioLevelTrack: Sendable, Hashable {
+    case system, microphone
+}
+
 /// An audio input device selectable for the mic track.
 public struct CaptureMicrophone: Identifiable, Hashable, Sendable {
     public let id: String      // AVCaptureDevice.uniqueID, as SCK expects
@@ -101,6 +105,12 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
     /// about once per second — a "you're recording the right thing" preview.
     /// Called on the capture queue.
     public var onPreviewFrame: ((CGImage) -> Void)?
+
+    /// Live audio levels (dBFS, roughly −60…0) for each audio track, emitted
+    /// at ~10 Hz from the same samples being written. Called on the capture queue.
+    public var onAudioLevel: ((AudioLevelTrack, Float) -> Void)?
+    private var lastLevelEmit: [AudioLevelTrack: CFAbsoluteTime] = [:]
+    private var levelPeak: [AudioLevelTrack: Float] = [:]
     private var lastPreviewTime = CMTime.zero
     private let previewContext = CIContext(options: [.cacheIntermediates: false])
 
@@ -276,11 +286,13 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
             emitPreviewIfDue(sampleBuffer)
 
         case .audio:
+            emitLevelIfDue(sampleBuffer, track: .system)
             if audioOnly { startSessionIfNeeded(at: sampleBuffer) }
             guard sessionStarted else { return }
             append(sampleBuffer, to: systemAudioInput)
 
         case .microphone:
+            emitLevelIfDue(sampleBuffer, track: .microphone)
             if audioOnly { startSessionIfNeeded(at: sampleBuffer) }
             guard sessionStarted else { return }
             append(sampleBuffer, to: micInput)
@@ -288,6 +300,86 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
         @unknown default:
             break
         }
+    }
+
+    /// RMS level of one audio sample buffer in dBFS, or nil if the format is
+    /// unexpected. Handles the PCM layouts SCK produces (Float32 / Int16,
+    /// interleaved or planar).
+    private func rmsLevel(of sampleBuffer: CMSampleBuffer) -> Float? {
+        guard let format = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee
+        else { return nil }
+
+        var listSize = 0
+        CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer, bufferListSizeNeededOut: &listSize, bufferListOut: nil,
+            bufferListSize: 0, blockBufferAllocator: nil, blockBufferMemoryAllocator: nil,
+            flags: 0, blockBufferOut: nil)
+        guard listSize > 0 else { return nil }
+        let listMemory = UnsafeMutableRawPointer.allocate(byteCount: listSize, alignment: 16)
+        defer { listMemory.deallocate() }
+        let list = listMemory.bindMemory(to: AudioBufferList.self, capacity: 1)
+        var blockBuffer: CMBlockBuffer?
+        guard CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer, bufferListSizeNeededOut: nil, bufferListOut: list,
+            bufferListSize: listSize, blockBufferAllocator: kCFAllocatorDefault,
+            blockBufferMemoryAllocator: kCFAllocatorDefault,
+            flags: kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment,
+            blockBufferOut: &blockBuffer) == noErr
+        else { return nil }
+
+        let isFloat = asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0
+        var sum = 0.0
+        var count = 0
+        for buffer in UnsafeMutableAudioBufferListPointer(list) {
+            guard let data = buffer.mData else { continue }
+            if isFloat, asbd.mBitsPerChannel == 32 {
+                let samples = data.assumingMemoryBound(to: Float.self)
+                let n = Int(buffer.mDataByteSize) / 4
+                for i in 0..<n { sum += Double(samples[i] * samples[i]) }
+                count += n
+            } else if !isFloat, asbd.mBitsPerChannel == 16 {
+                let samples = data.assumingMemoryBound(to: Int16.self)
+                let n = Int(buffer.mDataByteSize) / 2
+                for i in 0..<n { let v = Double(samples[i]) / 32768; sum += v * v }
+                count += n
+            } else if !isFloat, asbd.mBitsPerChannel == 24 {
+                // Packed 24-bit little-endian signed — what SCK uses for the mic.
+                let bytes = data.assumingMemoryBound(to: UInt8.self)
+                let n = Int(buffer.mDataByteSize) / 3
+                for i in 0..<n {
+                    let raw = Int32(bytes[i * 3]) | Int32(bytes[i * 3 + 1]) << 8 | Int32(bytes[i * 3 + 2]) << 16
+                    let signed = raw >= 0x80_0000 ? raw - 0x100_0000 : raw   // sign-extend
+                    let v = Double(signed) / 8_388_608
+                    sum += v * v
+                }
+                count += n
+            } else if !isFloat, asbd.mBitsPerChannel == 32 {
+                let samples = data.assumingMemoryBound(to: Int32.self)
+                let n = Int(buffer.mDataByteSize) / 4
+                for i in 0..<n { let v = Double(samples[i]) / 2_147_483_648; sum += v * v }
+                count += n
+            }
+        }
+        guard count > 0 else { return nil }
+        return Float(20 * log10(max(sqrt(sum / Double(count)), 1e-6)))
+    }
+
+    private func emitLevelIfDue(_ sampleBuffer: CMSampleBuffer, track: AudioLevelTrack) {
+        guard let onAudioLevel else { return }
+        if ProcessInfo.processInfo.environment["REC_DEBUG_AUDIO"] != nil, lastLevelEmit[track] == nil {
+            let asbd = CMSampleBufferGetFormatDescription(sampleBuffer)
+                .flatMap { CMAudioFormatDescriptionGetStreamBasicDescription($0)?.pointee }
+            let data = CMSampleBufferGetDataBuffer(sampleBuffer)
+            print("[debug] \(track): samples=\(CMSampleBufferGetNumSamples(sampleBuffer)) ready=\(CMSampleBufferDataIsReady(sampleBuffer)) hasBlock=\(data != nil) asbd=\(asbd.map { "flags=0x\(String($0.mFormatFlags, radix: 16)) bits=\($0.mBitsPerChannel) ch=\($0.mChannelsPerFrame) rate=\($0.mSampleRate)" } ?? "nil") level=\(rmsLevel(of: sampleBuffer).map { String($0) } ?? "nil")")
+        }
+        guard let level = rmsLevel(of: sampleBuffer) else { return }
+        levelPeak[track] = max(levelPeak[track] ?? -120, level)
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - (lastLevelEmit[track] ?? 0) >= 0.1 else { return }
+        lastLevelEmit[track] = now
+        onAudioLevel(track, levelPeak[track] ?? level)
+        levelPeak[track] = nil
     }
 
     private func emitPreviewIfDue(_ sampleBuffer: CMSampleBuffer) {

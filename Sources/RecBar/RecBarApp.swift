@@ -54,6 +54,18 @@ struct PanelView: View {
                     Text(controller.sourceLabel)
                         .font(.caption).foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle)
+
+                    // Live audio meters from the samples being written.
+                    LevelMeter(label: "Mic", detail: controller.activeMicName,
+                               level: controller.micLevel)
+                    if controller.micSilentSeconds >= 3 {
+                        Label("No mic signal for \(controller.micSilentSeconds)s — muted or wrong microphone?",
+                              systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption2).foregroundStyle(.orange)
+                    }
+                    LevelMeter(label: "Audio", detail: "meeting / system",
+                               level: controller.systemLevel)
+
                     // Live preview of the frames being written — proof the
                     // right window is being captured.
                     if let preview = controller.previewImage {
@@ -190,6 +202,7 @@ struct PanelView: View {
     }
 
     private var footer: some View {
+        VStack(alignment: .leading, spacing: 8) {
         HStack {
             if let last = controller.lastRecordingURL {
                 Button("Reveal Recording") {
@@ -209,6 +222,45 @@ struct PanelView: View {
                 controller.quit()
             }
             .controlSize(.small)
+        }
+        Toggle("Keep window on top", isOn: $controller.keepOnTop)
+            .toggleStyle(.checkbox)
+            .font(.caption)
+        }
+    }
+}
+
+/// A compact dBFS meter: label, live bar, numeric readout.
+struct LevelMeter: View {
+    let label: String
+    let detail: String
+    let level: Float   // dBFS
+
+    private var fraction: Double { Double(min(max(level + 60, 0), 60) / 60) }
+    private var color: Color {
+        if level > -6 { return .red }        // near clipping
+        if level > -40 { return .green }     // healthy signal
+        return .secondary                    // quiet / silence
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(label).font(.caption).monospacedDigit()
+                Text(detail).font(.caption2).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+            .frame(width: 96, alignment: .leading)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.quaternary)
+                    Capsule().fill(color).frame(width: geo.size.width * fraction)
+                }
+            }
+            .frame(height: 8)
+            Text(level <= -59 ? "—" : String(format: "%.0f dB", level))
+                .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+                .frame(width: 44, alignment: .trailing)
         }
     }
 }

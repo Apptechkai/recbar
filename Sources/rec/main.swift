@@ -24,6 +24,8 @@ func usage() -> Never {
                                (still 2 separate tracks, ~115 MB/hour).
         --no-normalize         Skip the speech clean-up + loudness normalization
                                that runs on stop.
+        --meter                Print mic / system audio levels every second
+                               (the once-a-minute status line always shows them).
       rec windows              List windows you can pass to --window.
       rec mics                 List microphones you can pass to --mic.
       rec stop                 Cleanly stop a recording started elsewhere.
@@ -147,8 +149,25 @@ func resolveMicrophone(matching query: String) -> CaptureMicrophone {
     fail("No microphone matches \"\(query)\". Run `rec mics` to see the list.")
 }
 
+/// Latest audio levels from the capture queue, read by the status timer.
+final class LevelStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var levels: [AudioLevelTrack: Float] = [:]
+    func set(_ track: AudioLevelTrack, _ level: Float) {
+        lock.lock(); levels[track] = level; lock.unlock()
+    }
+    var summary: String {
+        lock.lock(); defer { lock.unlock() }
+        func fmt(_ t: AudioLevelTrack) -> String {
+            guard let l = levels[t] else { return "—" }
+            return l <= -59 ? "silent" : String(format: "%.0f dB", l)
+        }
+        return "mic \(fmt(.microphone)), audio \(fmt(.system))"
+    }
+}
+
 func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?,
-                  micQuery: String?, normalize: Bool) async {
+                  micQuery: String?, normalize: Bool, meter: Bool) async {
     if let pid = PidFile.runningPID() {
         fail("A recording is already running (pid \(pid)). Stop it with `rec stop`.")
     }
@@ -200,6 +219,9 @@ func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?,
     }
     print("  Stop with Ctrl+C here, or `rec stop` from another terminal.")
 
+    let levels = LevelStore()
+    recorder.onAudioLevel = { track, level in levels.set(track, level) }
+
     let stopSignal = StopSignal()
     recorder.onStreamStopped = { error in
         stopSignal.fire("the capture stream stopped (\(error?.localizedDescription ?? "unknown reason"))")
@@ -220,9 +242,10 @@ func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?,
     // Once a minute, one status line — enough to see it's alive from the
     // terminal without any on-screen UI.
     let heartbeat = DispatchSource.makeTimerSource(queue: signalQueue)
-    heartbeat.schedule(deadline: .now() + 60, repeating: 60)
+    let interval: Double = meter ? 1 : 60
+    heartbeat.schedule(deadline: .now() + interval, repeating: interval)
     heartbeat.setEventHandler {
-        print("  … recording \(formatDuration(recorder.elapsed)), \(fileSizeString(outputURL)) so far")
+        print("  … \(formatDuration(recorder.elapsed))  \(levels.summary)  (\(fileSizeString(outputURL)))")
     }
     heartbeat.resume()
 
@@ -304,6 +327,8 @@ case "start":
     rest.removeAll { $0 == "--audio-only" || $0 == "-a" }
     let normalize = !rest.contains("--no-normalize")
     rest.removeAll { $0 == "--no-normalize" }
+    let meter = rest.contains("--meter")
+    rest.removeAll { $0 == "--meter" }
     func takeValue(_ long: String, _ short: String) -> String? {
         guard let flagIndex = rest.firstIndex(where: { $0 == long || $0 == short }) else { return nil }
         guard flagIndex + 1 < rest.count else { usage() }
@@ -315,7 +340,8 @@ case "start":
     let micQuery = takeValue("--mic", "-m")
     if rest.count > 1 { usage() }
     await commandStart(outputPath: rest.first, audioOnly: audioOnly,
-                       windowQuery: windowQuery, micQuery: micQuery, normalize: normalize)
+                       windowQuery: windowQuery, micQuery: micQuery,
+                       normalize: normalize, meter: meter)
 case "windows":
     await commandWindows()
 case "mics":

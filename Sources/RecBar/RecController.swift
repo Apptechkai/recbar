@@ -28,6 +28,22 @@ final class RecController: ObservableObject {
     /// Live thumbnail of what's being written to disk (nil in audio-only mode).
     @Published private(set) var previewImage: CGImage?
 
+    /// Live audio levels in dBFS while recording, plus how long the mic has
+    /// been silent (to flag a muted / wrong microphone).
+    @Published private(set) var micLevel: Float = -60
+    @Published private(set) var systemLevel: Float = -60
+    @Published private(set) var micSilentSeconds: Int = 0
+    private var micLastSignal = Date()
+    @Published private(set) var activeMicName = ""
+
+    /// Panel window stays above other apps (else it hides when you click away).
+    @Published var keepOnTop: Bool = UserDefaults.standard.bool(forKey: "keepOnTop") {
+        didSet {
+            UserDefaults.standard.set(keepOnTop, forKey: "keepOnTop")
+            PanelWindow.shared.applyPinning(keepOnTop)
+        }
+    }
+
     /// After Stop: loudness normalization in progress (Start stays disabled).
     @Published private(set) var isFinalizing = false
     @Published private(set) var finalizeFraction: Double?
@@ -107,6 +123,26 @@ final class RecController: ObservableObject {
             newRecorder.onPreviewFrame = { [weak self] image in
                 Task { @MainActor in self?.previewImage = image }
             }
+            newRecorder.onAudioLevel = { [weak self] track, level in
+                Task { @MainActor in
+                    guard let self else { return }
+                    switch track {
+                    case .system:
+                        self.systemLevel = level
+                    case .microphone:
+                        self.micLevel = level
+                        // Real mics idle around −45…−55 dB (room tone); only
+                        // digital silence (muted / missing device) is lower.
+                        if level > -58 { self.micLastSignal = Date() }
+                        self.micSilentSeconds = Int(Date().timeIntervalSince(self.micLastSignal))
+                    }
+                }
+            }
+            activeMicName = microphone?.name ?? (microphones.first?.name ?? "system default")
+            micLastSignal = Date()
+            micLevel = -60
+            systemLevel = -60
+            micSilentSeconds = 0
             newRecorder.onStreamStopped = { [weak self] error in
                 Task { @MainActor in
                     await self?.stop(streamError: error?.localizedDescription ?? "unknown reason")

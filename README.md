@@ -110,8 +110,16 @@ never double-record.
 
 **Can't see the icon?** A crowded menu bar hides it (macOS drops overflow
 items silently). Two icon-free ways to the same panel: open RecBar again from
-Spotlight while it's running, or press **⌃⌥R** anywhere — either shows the
-panel as a small floating window.
+Spotlight / click its Dock icon while it's running, or press **⌃⌥R** anywhere
+— either shows the panel as a small window. By default the window hides when
+you click into another app; tick **Keep window on top** to pin it.
+
+While recording, the panel shows what's actually being captured: a live
+thumbnail of the video frames, and **live level meters for the mic and the
+system audio**, computed from the same samples being written to disk. A
+"no mic signal" warning appears if the mic goes digitally silent for 3 s —
+usually a muted or wrong microphone. The CLI shows the same levels in its
+status line (`--meter` for once a second).
 
 RecBar needs its own one-time permission grant (Screen & System Audio
 Recording + Microphone → *RecBar*). macOS ties that grant to the app's code

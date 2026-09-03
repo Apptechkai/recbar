@@ -20,12 +20,19 @@ final class PanelWindow {
             window.title = "RecBar"
             window.contentView = hosting
             window.isReleasedWhenClosed = false
-            window.level = .floating
             window.center()
             self.window = window
+            applyPinning(RecController.shared.keepOnTop)
         }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Pinned: floats above other apps. Unpinned: hides as soon as another
+    /// app is clicked (comes back via Dock icon or ⌃⌥R).
+    func applyPinning(_ pinned: Bool) {
+        window?.level = pinned ? .floating : .normal
+        window?.hidesOnDeactivate = !pinned
     }
 }
 
