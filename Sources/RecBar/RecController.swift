@@ -20,21 +20,18 @@ final class RecController: ObservableObject {
 
     /// Capture source: 0 (kCGNullWindowID) = entire display, else a window id.
     @Published var selectedWindowID: CGWindowID = 0
-    /// A source chosen in the system thumbnail picker; overrides the dropdown.
-    @Published private(set) var pickedFilter: SCContentFilter?
-    @Published private(set) var pickedLabel: String?
+    /// A source chosen in the thumbnail picker; overrides the dropdown.
+    @Published private(set) var pickedSource: CaptureSource?
+    var pickedLabel: String? { pickedSource?.label }
 
     func pickSourceVisually() {
-        ContentPicker.shared.pick { [weak self] filter in
-            guard let self, let filter else { return }
-            self.pickedFilter = filter
-            self.pickedLabel = filter.recDescription
+        SourcePickerWindow.shared.show { [weak self] source in
+            self?.pickedSource = source
         }
     }
 
     func clearPickedSource() {
-        pickedFilter = nil
-        pickedLabel = nil
+        pickedSource = nil
     }
     @Published private(set) var windows: [CaptureWindow] = []
     @Published private(set) var sourceLabel = "Entire display"
@@ -120,8 +117,8 @@ final class RecController: ObservableObject {
         guard await ensurePermissions() else { return }
 
         var source: CaptureSource = .display
-        if let pickedFilter {
-            source = .filter(pickedFilter, label: pickedLabel ?? "Selected content")
+        if let pickedSource {
+            source = pickedSource
         } else if selectedWindowID != 0 {
             guard let window = windows.first(where: { $0.id == selectedWindowID }) else {
                 alert("The selected window is gone.", detail: "Pick a source again.")

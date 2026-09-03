@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreGraphics
 import Foundation
+import ImageIO
 import RecCore
 
 // MARK: - Helpers
@@ -369,6 +370,36 @@ case "mics":
 case "normalize":
     guard arguments.count == 2 else { usage() }
     await commandNormalize(path: arguments[1])
+case "thumbs":
+    // Undocumented: dump picker thumbnails as PNGs into a directory (self-test
+    // for the SourceCatalog thumbnail path RecBar's picker relies on).
+    guard arguments.count == 2 else { usage() }
+    let dir = URL(fileURLWithPath: (arguments[1] as NSString).expandingTildeInPath)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    do {
+        let catalog = try await SourceCatalog.load()
+        print("\(catalog.windows.count) windows, \(catalog.applications.count) apps, \(catalog.displays.count) displays")
+        var written = 0
+        for window in catalog.windows.prefix(6) {
+            if let image = await catalog.thumbnail(for: window, maxWidth: 360) {
+                let url = dir.appendingPathComponent("window-\(window.id).png")
+                if let dest = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) {
+                    CGImageDestinationAddImage(dest, image, nil)
+                    if CGImageDestinationFinalize(dest) { written += 1 }
+                }
+                print("  \(window.label) → \(image.width)×\(image.height)")
+            } else {
+                print("  \(window.label) → no thumbnail")
+            }
+        }
+        for app in catalog.applications.prefix(2) {
+            let image = await catalog.thumbnail(for: app, maxWidth: 360)
+            print("  app \(app.name) → \(image.map { "\($0.width)×\($0.height)" } ?? "no thumbnail")")
+        }
+        print("wrote \(written) PNGs to \(dir.path)")
+    } catch {
+        fail("\(error)")
+    }
 case "stop":
     commandStop()
 case "status":

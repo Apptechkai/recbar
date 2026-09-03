@@ -138,7 +138,7 @@ struct PanelView: View {
                     Button {
                         controller.pickSourceVisually()
                     } label: {
-                        Label("Choose visually (thumbnails)…", systemImage: "rectangle.grid.2x2")
+                        Label("Choose from thumbnails…", systemImage: "rectangle.grid.2x2")
                     }
                     .controlSize(.small)
                     if let hint = controller.windowsHint {

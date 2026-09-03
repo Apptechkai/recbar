@@ -61,10 +61,11 @@ Window capture has a useful side effect: ScreenCaptureKit limits **system
 audio to the app that owns the window**, so Slack pings, Spotify, and other
 apps stay out of the meeting track. A Chrome *tab* is not its own window —
 drag the tab out into a separate window first if you want to capture just it.
-RecBar has the same choice in its "Record:" dropdown, plus **Choose visually
-(thumbnails)…** which opens macOS's own content picker — the thumbnail grid
-FaceTime and Zoom use — where you can pick a window, a **whole app** (all its
-windows, audio limited to that app), or a display by looking at live previews.
+RecBar has the same choice in its "Record:" dropdown, plus **Choose from
+thumbnails…** — a Chrome-style picker with live previews and app icons, in
+three tabs: **Window**, **App** (all of an app's windows, audio limited to that
+app — the easiest choice for meetings), and **Entire screen**. Click a card to
+select, double-click or press Select to confirm.
 
 ### Choosing the microphone
 

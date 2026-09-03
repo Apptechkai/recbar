@@ -22,9 +22,27 @@ public struct CaptureWindow: Identifiable, Hashable, Sendable {
     public let id: CGWindowID
     public let title: String
     public let appName: String
+    public let processID: pid_t
     public let frame: CGRect
 
     public var label: String { title.isEmpty ? appName : "\(appName) — \(title)" }
+}
+
+/// A running app whose windows can all be captured together (audio limited
+/// to that app).
+public struct CaptureApplication: Identifiable, Hashable, Sendable {
+    public let id: pid_t
+    public let name: String
+    public let bundleID: String
+    public let windowCount: Int
+}
+
+/// A physical display.
+public struct CaptureDisplay: Identifiable, Hashable, Sendable {
+    public let id: CGDirectDisplayID
+    public let name: String
+    public let width: Int   // points
+    public let height: Int
 }
 
 public enum AudioLevelTrack: Sendable, Hashable {
@@ -41,15 +59,19 @@ public struct CaptureMicrophone: Identifiable, Hashable, Sendable {
 /// also narrows system audio to just the app that owns the window, so other
 /// apps' sounds stay out of the recording.
 public enum CaptureSource {
-    case display
+    case display                              // main display
+    case screen(CaptureDisplay)               // a specific display
     case window(CaptureWindow)
+    case application(CaptureApplication)      // all windows of one app
     /// A filter chosen in the system content picker (window, app, or display).
     case filter(SCContentFilter, label: String)
 
     public var label: String {
         switch self {
         case .display: return "Entire display"
+        case .screen(let display): return display.name
         case .window(let window): return window.label
+        case .application(let app): return "\(app.name) (all windows)"
         case .filter(_, let label): return label
         }
     }
@@ -110,7 +132,8 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
                   app.bundleIdentifier != Bundle.main.bundleIdentifier
             else { return nil }
             return CaptureWindow(id: window.windowID, title: window.title ?? "",
-                                 appName: app.applicationName, frame: window.frame)
+                                 appName: app.applicationName, processID: app.processID,
+                                 frame: window.frame)
         }
         .sorted { $0.frame.width * $0.frame.height > $1.frame.width * $1.frame.height }
     }
@@ -157,8 +180,9 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
         // -- Pick the main display ------------------------------------------
         let content = try await SCShareableContent.excludingDesktopWindows(
             false, onScreenWindowsOnly: false)
-        let mainID = CGMainDisplayID()
-        guard let display = content.displays.first(where: { $0.displayID == mainID })
+        var wantedDisplayID = CGMainDisplayID()
+        if case .screen(let target) = source { wantedDisplayID = target.id }
+        guard let display = content.displays.first(where: { $0.displayID == wantedDisplayID })
             ?? content.displays.first
         else {
             throw RecError("No display available to capture.")
@@ -174,8 +198,17 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
         let pixelWidth: Int
         let pixelHeight: Int
         switch source {
-        case .display:
+        case .display, .screen:
             filter = SCContentFilter(display: display, excludingWindows: [])
+            pixelWidth = mode?.pixelWidth ?? display.width
+            pixelHeight = mode?.pixelHeight ?? display.height
+        case .application(let target):
+            guard let app = content.applications.first(where: { $0.processID == target.id }) else {
+                throw RecError("\(target.name) is no longer running.")
+            }
+            // All of the app's windows composited on the display; audio is
+            // limited to that app.
+            filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
             pixelWidth = mode?.pixelWidth ?? display.width
             pixelHeight = mode?.pixelHeight ?? display.height
         case .window(let target):
