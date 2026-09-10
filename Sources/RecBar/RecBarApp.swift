@@ -27,12 +27,15 @@ struct RecBarApp: App {
 struct PanelView: View {
     @ObservedObject var controller: RecController
     @ObservedObject var transcriber: Transcriber
+    @ObservedObject var exporter = Exporter.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             recordingSection
             Divider()
             transcribeSection
+            Divider()
+            exportSection
             Divider()
             footer
         }
@@ -222,6 +225,44 @@ struct PanelView: View {
                     .font(.caption).foregroundStyle(.red)
                     .lineLimit(4)
                     .textSelection(.enabled)
+            }
+        }
+    }
+
+    /// Shareable .mp4: one mixed audio track so any player/upload hears both sides.
+    private var exportSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                exporter.pickAndExport(defaultFile: controller.lastRecordingURL)
+            } label: {
+                Label("Export for Sharing (.mp4)…", systemImage: "square.and.arrow.up")
+            }
+            .disabled(exporter.isBusy)
+            Toggle("Burn subtitles into the video", isOn: $exporter.burnSubtitles)
+                .toggleStyle(.checkbox)
+                .disabled(exporter.isBusy)
+                .help("Uses the .srt next to the recording; re-encodes the video")
+
+            if exporter.isBusy {
+                HStack(spacing: 8) {
+                    ProgressView(value: exporter.fraction ?? 0)
+                    Text("\(Int((exporter.fraction ?? 0) * 100))%")
+                        .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                }
+            } else if let result = exporter.resultURL {
+                HStack {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    Text(result.lastPathComponent)
+                        .font(.caption).lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([result]) }
+                        .controlSize(.small)
+                }
+            } else if let error = exporter.errorText {
+                Text(error).font(.caption).foregroundStyle(.red).lineLimit(4).textSelection(.enabled)
+            } else {
+                Text("Mixes both audio tracks into one; the 3-track original is kept.")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
         }
     }

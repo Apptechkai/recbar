@@ -39,6 +39,11 @@ func usage() -> Never {
                                WhisperKit model (downloaded on first use).
         --translate            Translate speech to English instead of
                                transcribing it as spoken.
+      rec export <file>        Write <file>-share.mp4: one mixed stereo audio
+                               track, so any player/upload hears both sides.
+                               A matching .srt is attached as subtitles.
+        --burn-subtitles       Render the .srt into the picture instead
+                               (re-encodes video).
       rec stop                 Cleanly stop a recording started elsewhere.
       rec status               Show whether a recording is running.
     """)
@@ -367,6 +372,24 @@ func commandTranscribe(path: String, translate: Bool) async {
     }
 }
 
+func commandExport(path: String, burn: Bool) async {
+    let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+    guard FileManager.default.fileExists(atPath: url.path) else {
+        fail("No such file: \(url.path)")
+    }
+    print("Exporting shareable copy of \(url.lastPathComponent)…")
+    let lastShown = LockedValue(-1)
+    do {
+        let out = try await ShareExport.export(fileURL: url, burnSubtitles: burn) { fraction in
+            let percent = Int(fraction * 100) / 10 * 10
+            if lastShown.exchange(percent) != percent { print("  … \(percent)%") }
+        }
+        print("✔ Wrote \(out.path)  (\(fileSizeString(out)))")
+    } catch {
+        fail("\(error)")
+    }
+}
+
 func commandStatus() {
     if let pid = PidFile.runningPID() {
         print("● Recording in progress (pid \(pid)).")
@@ -415,6 +438,12 @@ case "transcribe":
     rest.removeAll { $0 == "--translate" }
     guard rest.count == 1 else { usage() }
     await commandTranscribe(path: rest[0], translate: translate)
+case "export":
+    var rest = Array(arguments.dropFirst())
+    let burn = rest.contains("--burn-subtitles")
+    rest.removeAll { $0 == "--burn-subtitles" }
+    guard rest.count == 1 else { usage() }
+    await commandExport(path: rest[0], burn: burn)
 case "thumbs":
     // Undocumented: dump picker thumbnails as PNGs into a directory (self-test
     // for the SourceCatalog thumbnail path RecBar's picker relies on).

@@ -129,6 +129,7 @@ rec windows                        # list capturable windows
 rec mics                           # list microphones
 rec normalize meeting.mov          # audio clean-up on an existing file, in place
 rec transcribe meeting.mov         # → meeting.srt (add --translate for English)
+rec export meeting.mov             # → meeting-share.mp4, one mixed audio track
 ```
 
 Default output: `~/Movies/recordings/rec-YYYY-MM-DD-HHmmss.mov`. Both
@@ -144,9 +145,19 @@ ffmpeg -i meeting.mov -map 0:a:0 them.wav -map 0:a:1 me.wav
 `0:a:0` = system audio (participants), `0:a:1` = microphone (you).
 
 Multi-track playback varies by player: **QuickTime** mixes both tracks;
-**VLC** plays one at a time (Audio → Audio Track → Track 2 for the mic). A
-recording made with nothing playing on the Mac has a silent track 1 — that's
-expected, not a bug.
+**VLC** plays one at a time (Audio → Audio Track → Track 2 for the mic). Most
+upload targets and other people's players use **only the first track** — so
+before sharing, export a single-track copy:
+
+```sh
+rec export meeting.mov                    # meeting-share.mp4: both sides mixed,
+                                          # video copied, .srt attached if present
+rec export meeting.mov --burn-subtitles   # subtitles rendered into the picture
+```
+
+RecBar has the same as **Export for Sharing (.mp4)…**. The 3-track original
+stays untouched. A recording made with nothing playing on the Mac has a silent
+track 1 — that's expected, not a bug.
 
 ## What it can't do
 

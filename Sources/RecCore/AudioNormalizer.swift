@@ -115,8 +115,10 @@ public enum AudioNormalizer {
         return "measured_I=\(i):measured_TP=\(tp):measured_LRA=\(lra):measured_thresh=\(thresh):offset=\(offset)"
     }
 
-    private static func runFFmpeg(_ ffmpeg: String, _ args: [String],
-                                  onStdoutLine: (@Sendable (String) -> Void)? = nil)
+    /// Runs ffmpeg, streaming stdout lines (for `-progress pipe:1`) and
+    /// collecting stderr. Shared by the normalizer and the share exporter.
+    static func runFFmpeg(_ ffmpeg: String, _ args: [String],
+                          onStdoutLine: (@Sendable (String) -> Void)? = nil)
         async throws -> (status: Int32, stderr: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: ffmpeg)
