@@ -16,6 +16,9 @@ final class RecController: ObservableObject {
     @Published private(set) var elapsedText = "00:00:00"
     @Published var audioOnly = false
     @Published var normalizeAudio = true
+    /// Mic through macOS voice processing (echo cancellation): keeps the
+    /// meeting audio playing from the speakers off the mic track.
+    @Published var echoCancellation = true
     @Published private(set) var lastRecordingURL: URL?
 
     /// Capture source: 0 (kCGNullWindowID) = entire display, else a window id.
@@ -135,7 +138,8 @@ final class RecController: ObservableObject {
                 at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             let microphone = microphones.first { $0.id == selectedMicID }
             let newRecorder = try await Recorder(outputURL: outputURL, audioOnly: audioOnly,
-                                                 source: source, microphone: microphone)
+                                                 source: source, microphone: microphone,
+                                                 echoCancellation: echoCancellation)
             newRecorder.onPreviewFrame = { [weak self] image in
                 Task { @MainActor in self?.previewImage = image }
             }

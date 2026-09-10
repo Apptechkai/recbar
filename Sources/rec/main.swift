@@ -25,6 +25,10 @@ func usage() -> Never {
                                (still 2 separate tracks, ~115 MB/hour).
         --no-normalize         Skip the speech clean-up + loudness normalization
                                that runs on stop.
+        --no-echo-cancel       Capture the mic raw instead of through macOS
+                               voice processing (echo cancellation + noise
+                               suppression, which keeps the meeting audio
+                               coming out of your speakers off the mic track).
         --meter                Print mic / system audio levels every second
                                (the once-a-minute status line always shows them).
       rec windows              List windows you can pass to --window.
@@ -174,7 +178,7 @@ final class LevelStore: @unchecked Sendable {
 }
 
 func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?,
-                  micQuery: String?, normalize: Bool, meter: Bool) async {
+                  micQuery: String?, normalize: Bool, meter: Bool, echoCancel: Bool) async {
     if let pid = PidFile.runningPID() {
         fail("A recording is already running (pid \(pid)). Stop it with `rec stop`.")
     }
@@ -206,7 +210,8 @@ func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?,
     let recorder: Recorder
     do {
         recorder = try await Recorder(outputURL: outputURL, audioOnly: audioOnly,
-                                      source: source, microphone: microphone)
+                                      source: source, microphone: microphone,
+                                      echoCancellation: echoCancel)
         try await recorder.start()
     } catch {
         fail("Could not start capture: \(error)")
@@ -218,7 +223,8 @@ func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?,
     if case .window(let window) = source {
         print("  source: window \"\(window.label)\" — system audio limited to \(window.appName)")
     }
-    print("  mic: \(microphone?.name ?? (Recorder.availableMicrophones().first?.name ?? "system default"))")
+    print("  mic: \(microphone?.name ?? (Recorder.availableMicrophones().first?.name ?? "system default"))"
+          + (recorder.echoCancellationActive ? " (echo-cancelled)" : " (raw)"))
     if audioOnly {
         print("  system audio (track 1) + mic (track 2), no video, no on-screen UI")
     } else {
@@ -381,6 +387,8 @@ case "start":
     rest.removeAll { $0 == "--no-normalize" }
     let meter = rest.contains("--meter")
     rest.removeAll { $0 == "--meter" }
+    let echoCancel = !rest.contains("--no-echo-cancel")
+    rest.removeAll { $0 == "--no-echo-cancel" }
     func takeValue(_ long: String, _ short: String) -> String? {
         guard let flagIndex = rest.firstIndex(where: { $0 == long || $0 == short }) else { return nil }
         guard flagIndex + 1 < rest.count else { usage() }
@@ -393,7 +401,7 @@ case "start":
     if rest.count > 1 { usage() }
     await commandStart(outputPath: rest.first, audioOnly: audioOnly,
                        windowQuery: windowQuery, micQuery: micQuery,
-                       normalize: normalize, meter: meter)
+                       normalize: normalize, meter: meter, echoCancel: echoCancel)
 case "windows":
     await commandWindows()
 case "mics":

@@ -51,6 +51,10 @@ instead of guessed by a diarization model.
   loudness normalization. Video is stream-copied, never re-encoded.
 - **Local transcription to `.srt`** with WhisperKit (large-v3 on the Neural
   Engine), speaker-labeled `[Me]` / `[Them]`; optional translate-to-English.
+- **Echo-cancelled microphone** — the mic is captured through macOS voice
+  processing (the same path FaceTime uses), so the meeting audio coming out of
+  your speakers doesn't end up on your mic track. Speakers work; headphones
+  aren't required.
 - **Microphone picker** — use your AirPods or headset without changing the
   system default.
 - **Nothing leaves your Mac.** No account, no telemetry, no network calls
@@ -117,6 +121,7 @@ rec start                          # main display + system audio + mic
 rec start --window "Meet"          # one window (title or app name substring)
 rec start --mic "AirPods"          # choose the microphone
 rec start --audio-only             # no video, ~115 MB/hour
+rec start --no-echo-cancel         # raw mic (no voice processing)
 rec start --meter                  # print mic/audio levels every second
 rec stop                           # from another terminal (or Ctrl+C)
 rec status

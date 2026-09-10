@@ -144,6 +144,10 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
     private let videoInput: AVAssetWriterInput?
     private let systemAudioInput: AVAssetWriterInput
     private let micInput: AVAssetWriterInput
+    /// Echo-cancelled mic path; nil means the mic comes raw from SCK.
+    private let micCapture: MicCapture?
+    /// True when the mic is captured with echo cancellation (voice processing).
+    public var echoCancellationActive: Bool { micCapture != nil }
 
     // All sample handling runs on this one serial queue, which also
     // serializes writer state (sessionStarted / finished).
@@ -171,11 +175,16 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
 
     public init(outputURL: URL, audioOnly: Bool = false,
                 source: CaptureSource = .display,
-                microphone: CaptureMicrophone? = nil) async throws {
+                microphone: CaptureMicrophone? = nil,
+                echoCancellation: Bool = true) async throws {
         self.outputURL = outputURL
         self.audioOnly = audioOnly
         self.source = source
         self.microphone = microphone
+
+        // Echo-cancelled mic via voice processing; fall back to SCK's raw mic
+        // if the audio unit can't be set up (odd devices, no input, …).
+        micCapture = echoCancellation ? (try? MicCapture(deviceUID: microphone?.id)) : nil
 
         // -- Pick the main display ------------------------------------------
         let content = try await SCShareableContent.excludingDesktopWindows(
@@ -247,7 +256,8 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
         config.channelCount = 2
         config.excludesCurrentProcessAudio = true
 
-        config.captureMicrophone = true        // macOS 15+: mic straight from SCK
+        // Mic: voice-processing path when available, else SCK's raw capture.
+        config.captureMicrophone = micCapture == nil
         config.microphoneCaptureDeviceID = microphone?.id  // nil = system default input
 
         stream = SCStream(filter: filter, configuration: config, delegate: streamDelegate)
@@ -278,9 +288,12 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
             AVEncoderBitRateKey: 160_000,
         ])
 
+        // Voice processing decides its own rate (often 24 or 48 kHz); encode
+        // at whatever it delivers rather than resampling.
+        let micSampleRate = micCapture.map { Int($0.format.sampleRate) } ?? 48_000
         micInput = AVAssetWriterInput(mediaType: .audio, outputSettings: [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: 48_000,
+            AVSampleRateKey: micSampleRate,
             AVNumberOfChannelsKey: 1,
             AVEncoderBitRateKey: 96_000,
         ])
@@ -298,7 +311,9 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
             try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
         }
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
-        try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: queue)
+        if micCapture == nil {
+            try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: queue)
+        }
     }
 
     public func start() async throws {
@@ -306,12 +321,34 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
             throw RecError("Could not start writing: \(writer.error?.localizedDescription ?? "unknown")")
         }
         try await stream.startCapture()
+        if let micCapture {
+            do {
+                try micCapture.start { [weak self] sample in
+                    guard let self else { return }
+                    self.queue.async { self.handleMicSample(sample) }
+                }
+            } catch {
+                try? await stream.stopCapture()
+                throw RecError("Could not start the microphone: \(error.localizedDescription)")
+            }
+        }
         startDate = Date()
+    }
+
+    /// Mic samples from the voice-processing path; same handling as SCK's
+    /// `.microphone` output. Runs on `queue`.
+    private func handleMicSample(_ sampleBuffer: CMSampleBuffer) {
+        guard !finished, sampleBuffer.isValid, CMSampleBufferDataIsReady(sampleBuffer) else { return }
+        emitLevelIfDue(sampleBuffer, track: .microphone)
+        if audioOnly { startSessionIfNeeded(at: sampleBuffer) }
+        guard sessionStarted else { return }
+        append(sampleBuffer, to: micInput)
     }
 
     /// Stops capture and finalizes the file. Safe to call exactly once;
     /// callers guard against double-invocation.
     public func stopAndFinish() async throws {
+        micCapture?.stop()
         try? await stream.stopCapture()
         queue.sync { finished = true }  // drain in-flight samples, then close the gate
 

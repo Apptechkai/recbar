@@ -163,6 +163,8 @@ struct PanelView: View {
                         .toggleStyle(.checkbox)
                     Toggle("Clean up + normalize audio on stop", isOn: $controller.normalizeAudio)
                         .toggleStyle(.checkbox)
+                    Toggle("Echo cancellation (keeps speaker audio off the mic)", isOn: $controller.echoCancellation)
+                        .toggleStyle(.checkbox)
                 }
                 .task { await controller.refreshWindows() }
                 .onAppear { Task { await controller.refreshWindows() } }

@@ -8,6 +8,8 @@
   stereo), microphone (AAC mono). Audio is never mixed.
 - Window/app capture limits system audio to that app.
 - Microphone selection (`--mic`, RecBar picker).
+- Echo-cancelled microphone via macOS voice processing (`--no-echo-cancel`
+  to opt out): meeting audio played through speakers stays off the mic track.
 - Audio-only mode (`--audio-only`).
 - Crash-resilient writing (5-second movie fragments).
 - On-stop audio clean-up: high-pass, spectral denoise, presence lift on the
