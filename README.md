@@ -170,6 +170,17 @@ track 1 — that's expected, not a bug.
   its own window, or capture the whole browser app.
 - Run on Windows or Linux. It's built on ScreenCaptureKit.
 
+## Verifying a build
+
+```sh
+make smoke     # ~1 minute; plays a few seconds of speech through your speakers
+```
+
+Records for real and checks the results with ffprobe — track layout, levels,
+echo cancellation (mic/speaker correlation), window sizing, normalize, export,
+and transcription of known speech. 18 checks; see
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## How it works
 
 One `SCStream` delivers screen frames, system audio, and the microphone

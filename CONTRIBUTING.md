@@ -35,12 +35,25 @@ clean-up and transcription; recording itself needs nothing extra.
 If a feature is useful from the terminal, put the logic in `RecCore` and
 expose it in both `rec` and `RecBar`.
 
+## Testing
+
+```sh
+make smoke
+```
+
+Runs the real engine end to end in about a minute and asserts on the files
+with ffprobe: an audio-only recording (system audio captured, echo
+cancellation keeping speaker audio off the mic, mic still hearing a control
+sound), a window capture (video sized to the window, all tracks, clean
+decode), normalize, export, and transcribe against known speech. It plays a
+few seconds of speech through your speakers and needs Screen Recording +
+Microphone permission for your terminal. CI runners have no screen or mic, so
+this stays a local check; CI only builds.
+
 ## Pull requests
 
 - One change per PR, with a sentence on *why*.
-- Test on a real recording: build succeeds, a 15-second capture produces a
-  playable `.mov` with 1 video + 2 audio tracks, and `Ctrl+C` / Stop finalizes
-  cleanly.
+- `make smoke` passes on your machine; mention anything it skipped.
 - Keep the code readable over clever; comments explain intent, not syntax.
 
 ## Reporting bugs

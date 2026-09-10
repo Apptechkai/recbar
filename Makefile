@@ -6,7 +6,11 @@ APP = RecBar.app
 # self-signed cert; override with SIGN="Developer ID Application: ...".
 SIGN ?= $(shell security find-identity -p codesigning 2>/dev/null | grep -q '"RecBar Dev"' && echo "RecBar Dev" || echo "-")
 
-.PHONY: build install uninstall app install-app uninstall-app clean
+.PHONY: build install uninstall app install-app uninstall-app clean smoke
+
+# End-to-end check of the real capture engine (plays sound; ~1 minute).
+smoke: build
+	@bash scripts/smoke.sh
 
 build:
 	swift build -c release
