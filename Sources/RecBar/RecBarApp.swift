@@ -24,264 +24,299 @@ struct RecBarApp: App {
     }
 }
 
+// MARK: - Panel
+
 struct PanelView: View {
     @ObservedObject var controller: RecController
     @ObservedObject var transcriber: Transcriber
     @ObservedObject var exporter = Exporter.shared
+    @State private var optionsExpanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            recordingSection
-            Divider()
-            transcribeSection
-            Divider()
-            exportSection
-            Divider()
+        VStack(alignment: .leading, spacing: 14) {
+            header
+            Section(title: "Record", icon: "record.circle") {
+                if controller.isRecording {
+                    recordingLive
+                } else if controller.isFinalizing {
+                    finalizing
+                } else {
+                    recordSetup
+                }
+            }
+            Section(title: "After recording", icon: "wand.and.stars") {
+                transcribeRow
+                Divider().padding(.vertical, 2)
+                exportRow
+            }
             footer
         }
-        .padding(14)
-        .frame(width: 330)
+        .padding(16)
+        .frame(width: 360)
     }
 
-    private var recordingSection: some View {
-        Group {
-            if controller.isRecording {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Image(systemName: "record.circle.fill").foregroundStyle(.red)
-                        Text("Recording — \(controller.elapsedText)").monospacedDigit()
-                        Spacer()
-                        Button("Stop") { Task { await controller.stop() } }
-                            .keyboardShortcut(.defaultAction)
-                    }
-                    Text(controller.sourceLabel)
-                        .font(.caption).foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.middle)
+    // MARK: Header
 
-                    // Live audio meters from the samples being written.
-                    LevelMeter(label: "Mic", detail: controller.activeMicName,
-                               level: controller.micLevel)
-                    if controller.micSilentSeconds >= 3 {
-                        Label("No mic signal for \(controller.micSilentSeconds)s — muted or wrong microphone?",
-                              systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption2).foregroundStyle(.orange)
-                    }
-                    LevelMeter(label: "Audio", detail: "meeting / system",
-                               level: controller.systemLevel)
+    private var header: some View {
+        HStack {
+            Text("RecBar").font(.title3.weight(.semibold))
+            Spacer()
+            statusPill
+        }
+    }
 
-                    // Live preview of the frames being written — proof the
-                    // right window is being captured.
-                    if let preview = controller.previewImage {
-                        Image(decorative: preview, scale: 1)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 170)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
-                    } else if !controller.audioOnly {
-                        Text("Waiting for first frame…")
-                            .font(.caption2).foregroundStyle(.tertiary)
+    @ViewBuilder private var statusPill: some View {
+        if controller.isRecording {
+            Label("REC \(controller.elapsedText)", systemImage: "circle.fill")
+                .font(.caption.weight(.medium)).monospacedDigit()
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Capsule().fill(.red))
+        } else if controller.isFinalizing {
+            Label("Finalizing", systemImage: "hourglass")
+                .font(.caption).foregroundStyle(.secondary)
+        } else {
+            Text("Ready").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: Record — setup
+
+    private var recordSetup: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Source
+            LabeledRow("Source") {
+                if let picked = controller.pickedLabel {
+                    HStack(spacing: 6) {
+                        Label(picked, systemImage: "checkmark.rectangle")
+                            .lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 0)
+                        IconButton("xmark.circle.fill", help: "Back to the dropdown") {
+                            controller.clearPickedSource()
+                        }
+                    }
+                } else {
+                    HStack(spacing: 6) {
+                        Picker("", selection: $controller.selectedWindowID) {
+                            Text("Entire display").tag(CGWindowID(0))
+                            ForEach(controller.windows) { window in
+                                Text(window.label).lineLimit(1).tag(window.id)
+                            }
+                        }
+                        .labelsHidden()
+                        IconButton("rectangle.grid.2x2", help: "Choose from thumbnails") {
+                            controller.pickSourceVisually()
+                        }
+                        IconButton("arrow.clockwise", help: "Refresh window list") {
+                            Task { await controller.refreshWindows(requestPermission: true) }
+                        }
                     }
                 }
-            } else if controller.isFinalizing {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Cleaning up + normalizing audio…")
-                        .font(.caption).foregroundStyle(.secondary)
-                    if let fraction = controller.finalizeFraction {
-                        HStack(spacing: 8) {
-                            ProgressView(value: fraction)
-                            Text("\(Int(fraction * 100))%")
-                                .font(.caption).monospacedDigit()
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        ProgressView().progressViewStyle(.linear)
+            }
+            if let hint = controller.windowsHint {
+                Caption(hint)
+            } else if controller.selectedWindowID != 0 || controller.pickedLabel != nil {
+                Caption("System audio will be limited to this app.")
+            }
+
+            // Mic
+            LabeledRow("Mic") {
+                Picker("", selection: $controller.selectedMicID) {
+                    Text("System default\(controller.microphones.first.map { " (\($0.name))" } ?? "")")
+                        .tag("")
+                    ForEach(controller.microphones) { mic in
+                        Text(mic.name).tag(mic.id)
                     }
                 }
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    Button {
-                        Task { await controller.start() }
-                    } label: {
-                        Label("Start Recording", systemImage: "record.circle")
-                    }
-                    if let picked = controller.pickedLabel {
-                        // Visually picked source replaces the dropdown until cleared.
-                        HStack(spacing: 6) {
-                            Text("Record:").font(.body)
-                            Label(picked, systemImage: "checkmark.rectangle")
-                                .lineLimit(1).truncationMode(.middle)
-                            Spacer()
-                            Button {
-                                controller.clearPickedSource()
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                            }
-                            .buttonStyle(.plain).foregroundStyle(.secondary)
-                            .help("Back to the dropdown")
-                        }
-                    } else {
-                        HStack(spacing: 6) {
-                            Picker("Record:", selection: $controller.selectedWindowID) {
-                                Text("Entire display").tag(CGWindowID(0))
-                                ForEach(controller.windows) { window in
-                                    Text(window.label).lineLimit(1).tag(window.id)
-                                }
-                            }
-                            Button {
-                                Task { await controller.refreshWindows(requestPermission: true) }
-                            } label: {
-                                Image(systemName: "arrow.clockwise")
-                            }
-                            .controlSize(.small)
-                            .help("Refresh window list")
-                        }
-                    }
-                    Button {
-                        controller.pickSourceVisually()
-                    } label: {
-                        Label("Choose from thumbnails…", systemImage: "rectangle.grid.2x2")
-                    }
-                    .controlSize(.small)
-                    if let hint = controller.windowsHint {
-                        Text(hint)
-                            .font(.caption2).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else if controller.selectedWindowID != 0 || controller.pickedLabel != nil {
-                        Text("Window/app capture also limits system audio to that app.")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    } else {
-                        Text("\(controller.windows.count) windows available — pick one to record just that app.")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Picker("Mic:", selection: $controller.selectedMicID) {
-                        Text("System default\(controller.microphones.first.map { " (\($0.name))" } ?? "")")
-                            .tag("")
-                        ForEach(controller.microphones) { mic in
-                            Text(mic.name).tag(mic.id)
-                        }
-                    }
+                .labelsHidden()
+            }
+
+            // Options (collapsed by default; defaults are the right choice)
+            DisclosureGroup(isExpanded: $optionsExpanded) {
+                VStack(alignment: .leading, spacing: 6) {
                     Toggle("Audio only (no video)", isOn: $controller.audioOnly)
-                        .toggleStyle(.checkbox)
+                    Toggle("Echo cancellation", isOn: $controller.echoCancellation)
                     Toggle("Clean up + normalize audio on stop", isOn: $controller.normalizeAudio)
-                        .toggleStyle(.checkbox)
-                    Toggle("Echo cancellation (keeps speaker audio off the mic)", isOn: $controller.echoCancellation)
-                        .toggleStyle(.checkbox)
                 }
-                .task { await controller.refreshWindows() }
-                .onAppear { Task { await controller.refreshWindows() } }
+                .toggleStyle(.checkbox)
+                .font(.callout)
+                .padding(.top, 4)
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Options").font(.callout)
+                    Text(optionsSummary).font(.caption).foregroundStyle(.secondary)
+                    InfoButton("""
+                    Echo cancellation keeps the meeting audio coming out of your speakers \
+                    off your mic track (the same processing FaceTime uses).
+
+                    Clean-up runs after you stop: denoise, gentle compression, and loudness \
+                    normalization of each audio track. Video is never re-encoded.
+                    """)
+                }
             }
+
+            Button {
+                Task { await controller.start() }
+            } label: {
+                Label("Start Recording", systemImage: "record.circle")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .keyboardShortcut(.defaultAction)
+        }
+        .task { await controller.refreshWindows() }
+        .onAppear { Task { await controller.refreshWindows() } }
+    }
+
+    private var optionsSummary: String {
+        var parts: [String] = []
+        if controller.audioOnly { parts.append("audio only") }
+        if !controller.echoCancellation { parts.append("no echo cancel") }
+        if !controller.normalizeAudio { parts.append("no clean-up") }
+        return parts.isEmpty ? "defaults" : parts.joined(separator: " · ")
+    }
+
+    // MARK: Record — live
+
+    private var recordingLive: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(controller.sourceLabel)
+                .font(.callout).lineLimit(1).truncationMode(.middle)
+
+            LevelMeter(label: "Mic", detail: controller.activeMicName, level: controller.micLevel)
+            if controller.micSilentSeconds >= 3 {
+                Label("No mic signal for \(controller.micSilentSeconds)s — muted or wrong microphone?",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2).foregroundStyle(.orange)
+            }
+            LevelMeter(label: "Meeting", detail: "system audio", level: controller.systemLevel)
+
+            if let preview = controller.previewImage {
+                Image(decorative: preview, scale: 1)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 160)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
+            } else if !controller.audioOnly {
+                Caption("Waiting for first frame…")
+            }
+
+            Button {
+                Task { await controller.stop() }
+            } label: {
+                Label("Stop Recording", systemImage: "stop.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+            .controlSize(.large)
+            .keyboardShortcut(.defaultAction)
         }
     }
 
-    private var transcribeSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button {
-                transcriber.pickAndTranscribe()
-            } label: {
-                Label("Transcribe File to Subtitles…", systemImage: "captions.bubble")
-            }
-            .disabled(transcriber.isBusy)
-
-            Toggle("Translate to English", isOn: $transcriber.translateToEnglish)
-                .toggleStyle(.checkbox)
-                .disabled(transcriber.isBusy)
-
-            if transcriber.isBusy {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(transcriber.statusText)
-                            .font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Cancel") { transcriber.cancel() }
-                            .controlSize(.small)
-                    }
-                    if let fraction = transcriber.fraction {
-                        HStack(spacing: 8) {
-                            ProgressView(value: fraction)
-                            Text("\(Int(fraction * 100))%")
-                                .font(.caption).monospacedDigit()
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        ProgressView()
-                            .progressViewStyle(.linear)
-                    }
-                }
-            } else if let result = transcriber.resultURL {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                    Text(result.lastPathComponent)
-                        .font(.caption).lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    Button("Reveal") {
-                        NSWorkspace.shared.activateFileViewerSelecting([result])
-                    }
-                    .controlSize(.small)
-                }
-            } else if let error = transcriber.errorText {
-                Text(error)
-                    .font(.caption).foregroundStyle(.red)
-                    .lineLimit(4)
-                    .textSelection(.enabled)
-            }
-        }
-    }
-
-    /// Shareable .mp4: one mixed audio track so any player/upload hears both sides.
-    private var exportSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button {
-                exporter.pickAndExport(defaultFile: controller.lastRecordingURL)
-            } label: {
-                Label("Export for Sharing (.mp4)…", systemImage: "square.and.arrow.up")
-            }
-            .disabled(exporter.isBusy)
-            Toggle("Burn subtitles into the video", isOn: $exporter.burnSubtitles)
-                .toggleStyle(.checkbox)
-                .disabled(exporter.isBusy)
-                .help("Uses the .srt next to the recording; re-encodes the video")
-
-            if exporter.isBusy {
+    private var finalizing: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Cleaning up + normalizing audio…").font(.callout)
+            if let fraction = controller.finalizeFraction {
                 HStack(spacing: 8) {
-                    ProgressView(value: exporter.fraction ?? 0)
-                    Text("\(Int((exporter.fraction ?? 0) * 100))%")
+                    ProgressView(value: fraction)
+                    Text("\(Int(fraction * 100))%")
                         .font(.caption).monospacedDigit().foregroundStyle(.secondary)
                 }
-            } else if let result = exporter.resultURL {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                    Text(result.lastPathComponent)
-                        .font(.caption).lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([result]) }
-                        .controlSize(.small)
-                }
-            } else if let error = exporter.errorText {
-                Text(error).font(.caption).foregroundStyle(.red).lineLimit(4).textSelection(.enabled)
             } else {
-                Text("Mixes both audio tracks into one; the 3-track original is kept.")
-                    .font(.caption2).foregroundStyle(.secondary)
+                ProgressView().progressViewStyle(.linear)
+            }
+            Caption("The recording is already saved; this improves its audio.")
+        }
+    }
+
+    // MARK: After recording
+
+    private var transcribeRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 4) {
+                        Text("Transcribe to subtitles").font(.callout.weight(.medium))
+                        InfoButton("""
+                        Writes a .srt file next to the recording using a local Whisper model — \
+                        nothing is uploaded. RecBar recordings are transcribed per track, so lines \
+                        are labelled [Me] and [Them].
+                        """)
+                    }
+                    Toggle("Translate to English", isOn: $transcriber.translateToEnglish)
+                        .toggleStyle(.checkbox).font(.caption)
+                        .disabled(transcriber.isBusy)
+                }
+                Spacer()
+                Button("Transcribe…") { transcriber.pickAndTranscribe() }
+                    .disabled(transcriber.isBusy)
+            }
+            if transcriber.isBusy {
+                ProgressRow(status: transcriber.statusText, fraction: transcriber.fraction) {
+                    transcriber.cancel()
+                }
+            } else if let result = transcriber.resultURL {
+                ResultRow(url: result)
+            } else if let error = transcriber.errorText {
+                ErrorText(error)
             }
         }
     }
 
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: 8) {
-        HStack {
-            if let last = controller.lastRecordingURL {
-                Button("Reveal Recording") {
-                    NSWorkspace.shared.activateFileViewerSelecting([last])
+    private var exportRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 4) {
+                        Text("Export for sharing").font(.callout.weight(.medium))
+                        InfoButton("""
+                        Recordings keep the meeting audio and your mic as two separate tracks. \
+                        QuickTime plays both, but most other players and upload sites use only the \
+                        first track.
+
+                        Export mixes both tracks into one normal stereo track in an .mp4 (video \
+                        copied, not re-encoded) and attaches the .srt as subtitles if one exists. \
+                        The original 3-track recording is kept.
+                        """)
+                    }
+                    Toggle("Burn subtitles into the video", isOn: $exporter.burnSubtitles)
+                        .toggleStyle(.checkbox).font(.caption)
+                        .disabled(exporter.isBusy)
                 }
-                .controlSize(.small)
+                Spacer()
+                Button("Export…") { exporter.pickAndExport(defaultFile: controller.lastRecordingURL) }
+                    .disabled(exporter.isBusy)
             }
-            Button("Recordings Folder") {
+            if exporter.isBusy {
+                ProgressRow(status: "Exporting…", fraction: exporter.fraction, onCancel: nil)
+            } else if let result = exporter.resultURL {
+                ResultRow(url: result)
+            } else if let error = exporter.errorText {
+                ErrorText(error)
+            }
+        }
+    }
+
+    // MARK: Footer
+
+    private var footer: some View {
+        HStack(spacing: 10) {
+            IconButton("folder", help: "Open recordings folder") {
                 try? FileManager.default.createDirectory(
                     at: RecPaths.recordingsDirectory, withIntermediateDirectories: true)
                 NSWorkspace.shared.open(RecPaths.recordingsDirectory)
             }
-            .controlSize(.small)
+            if let last = controller.lastRecordingURL {
+                IconButton("doc.viewfinder", help: "Reveal last recording") {
+                    NSWorkspace.shared.activateFileViewerSelecting([last])
+                }
+            }
+            Toggle("Keep on top", isOn: $controller.keepOnTop)
+                .toggleStyle(.checkbox).font(.caption)
             Spacer()
             Button("Quit") {
                 transcriber.cancel()
@@ -289,9 +324,152 @@ struct PanelView: View {
             }
             .controlSize(.small)
         }
-        Toggle("Keep window on top", isOn: $controller.keepOnTop)
-            .toggleStyle(.checkbox)
-            .font(.caption)
+    }
+}
+
+// MARK: - Building blocks
+
+/// A titled card with an icon — the panel's grouping unit.
+private struct Section<Content: View>: View {
+    let title: String
+    let icon: String
+    @ViewBuilder let content: Content
+
+    init(title: String, icon: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.icon = icon
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(title.uppercased(), systemImage: icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            content
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.35)))
+    }
+}
+
+/// "Label    control" row with a fixed label column.
+private struct LabeledRow<Content: View>: View {
+    let label: String
+    @ViewBuilder let content: Content
+
+    init(_ label: String, @ViewBuilder content: () -> Content) {
+        self.label = label
+        self.content = content()
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Text(label).font(.callout).foregroundStyle(.secondary)
+                .frame(width: 52, alignment: .leading)
+            content
+        }
+    }
+}
+
+private struct IconButton: View {
+    let symbol: String
+    let help: String
+    let action: () -> Void
+
+    init(_ symbol: String, help: String, action: @escaping () -> Void) {
+        self.symbol = symbol
+        self.help = help
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) { Image(systemName: symbol) }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help(help)
+    }
+}
+
+/// ⓘ that opens an explanation popover.
+struct InfoButton: View {
+    let text: String
+    @State private var shown = false
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Button { shown.toggle() } label: {
+            Image(systemName: "info.circle")
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help("What does this do?")
+        .popover(isPresented: $shown, arrowEdge: .bottom) {
+            Text(text)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 280, alignment: .leading)
+                .padding(14)
+        }
+    }
+}
+
+private struct Caption: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+    var body: some View {
+        Text(text).font(.caption2).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private struct ErrorText: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+    var body: some View {
+        Text(text).font(.caption).foregroundStyle(.red).lineLimit(4).textSelection(.enabled)
+    }
+}
+
+private struct ProgressRow: View {
+    let status: String
+    let fraction: Double?
+    let onCancel: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(status).font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if let onCancel {
+                    Button("Cancel", action: onCancel).controlSize(.small)
+                }
+            }
+            if let fraction {
+                HStack(spacing: 8) {
+                    ProgressView(value: fraction)
+                    Text("\(Int(fraction * 100))%")
+                        .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+                }
+            } else {
+                ProgressView().progressViewStyle(.linear)
+            }
+        }
+    }
+}
+
+private struct ResultRow: View {
+    let url: URL
+    var body: some View {
+        HStack {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            Text(url.lastPathComponent)
+                .font(.caption).lineLimit(1).truncationMode(.middle)
+            Spacer()
+            Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                .controlSize(.small)
         }
     }
 }
