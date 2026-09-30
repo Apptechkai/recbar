@@ -235,11 +235,17 @@ Click the Dock icon or press **⌃⌥R** to open the panel:
 3. **Start Recording.** The panel shows elapsed time, level meters, and a live
    thumbnail; the Dock badge reads REC. Close the panel if you like —
    recording continues.
-4. **Stop.** The file is saved in `~/Movies/recordings/` within a second and
+4. **Stop.** The file is saved within a second — in `~/Movies/recordings/`
+   unless you chose another folder in Settings — and
    the panel is ready for the next recording straight away. Audio clean-up
    runs in the background (about 2½ minutes per hour of recording, measured on
    an M-series Mac); a strip in the panel shows its progress, and several
    recordings queue up and are processed one at a time.
+
+**Settings** (gear icon in the panel, or ⌘,) — choose the folder new
+recordings are saved to; it shows the free space there. If the folder isn't
+available when you press Start (say an external drive is unplugged), RecBar
+records to `~/Movies/recordings` instead and tells you, rather than failing.
 
 **Transcribe:** *Transcribe File to Subtitles…* → pick any video/audio file →
 a `.srt` appears next to it, with a live progress bar. RecBar recordings get
@@ -256,6 +262,7 @@ rec start --no-echo-cancel         # raw mic (no voice processing)
 rec start --meter                  # print mic/audio levels every second
 rec stop                           # from another terminal (or Ctrl+C)
 rec status
+rec folder ~/Documents/Meetings    # where new recordings go (rec folder --reset)
 rec windows                        # list capturable windows
 rec mics                           # list microphones
 rec normalize meeting.mov          # audio clean-up on an existing file, in place
@@ -263,7 +270,9 @@ rec transcribe meeting.mov         # → meeting.srt (add --translate for Englis
 rec export meeting.mov             # → meeting-share.mp4, one mixed audio track
 ```
 
-Default output: `~/Movies/recordings/rec-YYYY-MM-DD-HHmmss.mov`. Both
+Default output: `~/Movies/recordings/rec-YYYY-MM-DD-HHmmss.mov` — change the
+folder with `rec folder <path>` (or in RecBar's Settings; they share the
+setting). Both
 `Ctrl+C` and `rec stop` finalize the file cleanly and return immediately; the
 audio clean-up then continues as a detached background job, so you can
 `rec start` the next recording right away. `rec status` shows what's being
@@ -314,7 +323,7 @@ make smoke     # ~1 minute; plays a few seconds of speech through your speakers
 
 Records for real and checks the results with ffprobe — track layout, levels,
 echo cancellation (mic/speaker correlation), window sizing, normalize, export,
-and transcription of known speech, plus back-to-back recording. 24 checks; see
+and transcription of known speech, plus back-to-back recording and the folder setting. 28 checks; see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## How it works

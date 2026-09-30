@@ -27,5 +27,7 @@
 - Shareable export (`rec export`, RecBar "Export for Sharing"): one mixed
   stereo track in an .mp4, video stream-copied, sidecar `.srt` attached or
   burned in.
+- Recordings folder setting: RecBar Settings (⌘,) and `rec folder`, shared;
+  falls back to ~/Movies/recordings with a warning if the folder is missing.
 - `rec` CLI: `start` / `stop` / `status` / `windows` / `mics` / `normalize`
   / `transcribe` / `export`.

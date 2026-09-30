@@ -39,7 +39,13 @@ final class PanelWindow {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         HotKey.register()  // ⌃⌥R → show panel
-        Task { @MainActor in PanelWindow.shared.show() }  // Dock launch → panel
+        Task { @MainActor in
+            PanelWindow.shared.show()  // Dock launch → panel
+            // `open -a RecBar --args --show-settings` opens Settings directly.
+            if CommandLine.arguments.contains("--show-settings") {
+                SettingsWindow.shared.show()
+            }
+        }
     }
 
     /// Called when the user clicks the Dock icon while RecBar is running.

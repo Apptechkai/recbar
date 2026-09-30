@@ -200,5 +200,34 @@ else
 fi
 
 # ----------------------------------------------------------------------------
+section "7. Recordings folder setting"
+PREV_FOLDER=$(defaults read sg.com.apptechsystem.recbar.shared recordingsFolder 2>/dev/null || true)
+restore_folder() {
+  if [ -n "$PREV_FOLDER" ]; then
+    defaults write sg.com.apptechsystem.recbar.shared recordingsFolder "$PREV_FOLDER"
+  else
+    "$REC" folder --reset >/dev/null 2>&1
+  fi
+}
+CHOSEN="$WORK/chosen-folder"
+"$REC" folder "$CHOSEN" >/dev/null 2>&1 && [ -d "$CHOSEN" ] && pass "folder set (and created)" || fail "rec folder didn't set/create the folder"
+"$REC" start --audio-only --no-normalize >"$WORK/folder.log" 2>&1 &
+sleep 3; "$REC" stop >/dev/null 2>&1; sleep 1
+ls "$CHOSEN"/rec-*-audio.mov >/dev/null 2>&1 && pass "recording saved in the chosen folder" \
+  || fail "recording not in the chosen folder: $(grep -o '→ .*' "$WORK/folder.log")"
+"$REC" folder /System/recbar-smoke >/dev/null 2>&1 && fail "unusable folder was accepted" || pass "unusable folder rejected"
+defaults write sg.com.apptechsystem.recbar.shared recordingsFolder "/Volumes/NoSuchDrive-$$/recordings"
+"$REC" start --audio-only --no-normalize >"$WORK/fallback.log" 2>&1 &
+sleep 3; "$REC" stop >/dev/null 2>&1; sleep 1
+FALLBACK=$(grep -o "$HOME/Movies/recordings/rec-[0-9-]*-audio.mov" "$WORK/fallback.log" | head -1)
+if grep -q "isn't available" "$WORK/fallback.log" && [ -n "$FALLBACK" ] && [ -f "$FALLBACK" ]; then
+  pass "missing folder falls back to ~/Movies/recordings with a warning"
+else
+  fail "no fallback when the chosen folder is missing"
+fi
+[ -n "$FALLBACK" ] && rm -f "$FALLBACK"   # don't leave test clips in the user's folder
+restore_folder
+
+# ----------------------------------------------------------------------------
 printf "\n\033[1mResult:\033[0m %d passed, %d failed, %d skipped   (artifacts in %s)\n" "$PASS" "$FAIL" "$SKIP" "$WORK"
 [ "$FAIL" = 0 ]

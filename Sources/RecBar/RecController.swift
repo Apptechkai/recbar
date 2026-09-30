@@ -16,6 +16,9 @@ final class RecController: ObservableObject {
     @Published private(set) var elapsedText = "00:00:00"
     @Published var audioOnly = false
     @Published var normalizeAudio = true
+    /// Set when the chosen recordings folder wasn't usable at Start and the
+    /// default folder was used instead (e.g. external drive unplugged).
+    @Published private(set) var folderWarning: String?
     /// Mic through macOS voice processing (echo cancellation): keeps the
     /// meeting audio playing from the speakers off the mic track.
     @Published var echoCancellation = true
@@ -131,7 +134,9 @@ final class RecController: ObservableObject {
         }
         sourceLabel = source.label
 
-        let outputURL = RecPaths.defaultOutputURL(audioOnly: audioOnly)
+        let (folder, warning) = RecPaths.resolveRecordingsDirectory()
+        folderWarning = warning
+        let outputURL = RecPaths.outputURL(in: folder, audioOnly: audioOnly)
         do {
             try FileManager.default.createDirectory(
                 at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)

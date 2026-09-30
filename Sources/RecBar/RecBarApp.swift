@@ -21,6 +21,13 @@ struct RecBarApp: App {
             PanelView(controller: controller, transcriber: transcriber)
         }
         .menuBarExtraStyle(.window)
+        .commands {
+            // RecBar → Settings… (⌘,) in the app menu.
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") { SettingsWindow.shared.show() }
+                    .keyboardShortcut(",", modifiers: .command)
+            }
+        }
     }
 }
 
@@ -164,6 +171,24 @@ struct PanelView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .keyboardShortcut(.defaultAction)
+
+            // Where it will be saved — click to change.
+            let destination = RecPaths.resolveRecordingsDirectory()
+            Button {
+                SettingsWindow.shared.show()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: destination.warning == nil ? "folder" : "exclamationmark.triangle.fill")
+                    Text("Saves to \(RecPaths.displayPath(destination.url))")
+                        .lineLimit(1).truncationMode(.middle)
+                    Text("· Change").foregroundStyle(.tint)
+                }
+                .font(.caption2)
+                .foregroundStyle(destination.warning == nil ? Color.secondary : Color.orange)
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.plain)
+            .help(destination.warning ?? "Change the recordings folder in Settings")
         }
         .task { await controller.refreshWindows() }
         .onAppear { Task { await controller.refreshWindows() } }
@@ -183,6 +208,11 @@ struct PanelView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(controller.sourceLabel)
                 .font(.callout).lineLimit(1).truncationMode(.middle)
+            if let warning = controller.folderWarning {
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             LevelMeter(label: "Mic", detail: controller.activeMicName, level: controller.micLevel)
             if controller.micSilentSeconds >= 3 {
@@ -368,6 +398,9 @@ struct PanelView: View {
             Toggle("Keep on top", isOn: $controller.keepOnTop)
                 .toggleStyle(.checkbox).font(.caption)
             Spacer()
+            IconButton("gearshape", help: "Settings (⌘,)") {
+                SettingsWindow.shared.show()
+            }
             Button("Quit") {
                 controller.quit()   // confirms if recording / cleaning up
             }

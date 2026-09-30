@@ -34,6 +34,9 @@ func usage() -> Never {
                                coming out of your speakers off the mic track).
         --meter                Print mic / system audio levels every second
                                (the once-a-minute status line always shows them).
+      rec folder               Show where new recordings are saved.
+      rec folder <path>        Save new recordings there (shared with RecBar's
+                               Settings). `rec folder --reset` for the default.
       rec windows              List windows you can pass to --window.
       rec mics                 List microphones you can pass to --mic.
       rec normalize <file>     Run the audio clean-up + normalization on an
@@ -236,7 +239,9 @@ func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?,
     if let path = outputPath {
         outputURL = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
     } else {
-        outputURL = RecPaths.defaultOutputURL(audioOnly: audioOnly)
+        let (folder, warning) = RecPaths.resolveRecordingsDirectory()
+        if let warning { print("⚠︎ \(warning)") }
+        outputURL = RecPaths.outputURL(in: folder, audioOnly: audioOnly)
     }
     do {
         try FileManager.default.createDirectory(
@@ -462,6 +467,27 @@ func commandExport(path: String, burn: Bool) async {
     }
 }
 
+func commandFolder(_ argument: String?) {
+    switch argument {
+    case nil:
+        break
+    case "--reset":
+        RecSettings.customRecordingsFolder = nil
+    default:
+        let folder = URL(fileURLWithPath: (argument! as NSString).expandingTildeInPath, isDirectory: true)
+            .standardizedFileURL
+        if let problem = RecPaths.problem(with: folder) {
+            fail("\(RecPaths.displayPath(folder)) \(problem).")
+        }
+        RecSettings.customRecordingsFolder = folder
+    }
+    let (folder, warning) = RecPaths.resolveRecordingsDirectory()
+    if let warning { print("⚠︎ \(warning)") }
+    let isDefault = RecSettings.customRecordingsFolder == nil
+    print("Recordings are saved to \(RecPaths.displayPath(folder))\(isDefault ? " (default)" : "")")
+    if let free = RecPaths.freeSpaceDescription(for: folder) { print("  \(free)") }
+}
+
 func commandStatus() {
     if let pid = PidFile.runningPID() {
         print("● Recording in progress (pid \(pid)).")
@@ -507,6 +533,9 @@ case "start":
                        windowQuery: windowQuery, micQuery: micQuery,
                        normalize: normalize, meter: meter, echoCancel: echoCancel,
                        waitForProcessing: waitForProcessing)
+case "folder":
+    guard arguments.count <= 2 else { usage() }
+    commandFolder(arguments.count == 2 ? arguments[1] : nil)
 case "windows":
     await commandWindows()
 case "mics":
