@@ -1,12 +1,12 @@
-# Homebrew formula for a tap, e.g. github.com/<you>/homebrew-recbar
-# Install: brew tap <you>/recbar && brew install recbar
+# Homebrew formula for a tap, e.g. github.com/Apptechkai/homebrew-recbar
+# Install: brew tap Apptechkai/recbar && brew install recbar
 class Recbar < Formula
   desc "Headless meeting recorder for macOS: screen + separate audio tracks, no cloud, no overlay"
-  homepage "https://github.com/<you>/recbar"
-  url "https://github.com/<you>/recbar/archive/refs/tags/v1.0.0.tar.gz"
+  homepage "https://github.com/Apptechkai/recbar"
+  url "https://github.com/Apptechkai/recbar/archive/refs/tags/v1.0.0.tar.gz"
   sha256 "REPLACE_WITH_TARBALL_SHA256"
   license "MIT"
-  head "https://github.com/<you>/recbar.git", branch: "main"
+  head "https://github.com/Apptechkai/recbar.git", branch: "main"
 
   depends_on :macos => :sequoia
   depends_on "ffmpeg"

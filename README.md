@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/<you>/recbar/actions"><img src="https://github.com/<you>/recbar/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+  <a href="https://github.com/Apptechkai/recbar/actions"><img src="https://github.com/Apptechkai/recbar/actions/workflows/build.yml/badge.svg" alt="Build"></a>
   <img src="https://img.shields.io/badge/macOS-15.2%2B-blue" alt="macOS 15.2+">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT">
 </p>
@@ -68,34 +68,119 @@ instead of guessed by a diarization model.
 
 ## Install
 
-**Homebrew** (builds from source, no Gatekeeper prompt):
+RecBar is currently installed by building it from source, which takes about
+two minutes. A signed download and a Homebrew package are planned; until then,
+the steps below are the supported way.
+
+**You need:**
+
+- macOS 15.2 or newer (developed and tested on Apple silicon)
+- Xcode Command Line Tools — the compiler, no full Xcode required
+- [Homebrew](https://brew.sh), for two optional helper tools
+
+### 1. Install the prerequisites
 
 ```sh
-brew tap <you>/recbar
-brew install recbar
-cp -R "$(brew --prefix)/opt/recbar/RecBar.app" /Applications/
+xcode-select --install                 # skip if already installed
+brew install ffmpeg whisperkit-cli     # optional, see below
 ```
 
-**Download:** a signed, notarized `RecBar.app` and the `rec` binary are on the
-[Releases](https://github.com/<you>/recbar/releases) page.
+`ffmpeg` powers the audio clean-up after each recording and "Export for
+sharing"; `whisperkit-cli` powers transcription. Recording itself works
+without either.
 
-**From source:**
+### 2. Build and install
 
 ```sh
-git clone https://github.com/<you>/recbar && cd recbar
-make install PREFIX=/opt/homebrew/bin   # the `rec` CLI
-make install-app                        # RecBar.app → /Applications
+git clone https://github.com/Apptechkai/recbar.git
+cd recbar
+make install-app                          # RecBar.app → /Applications
+make install PREFIX="$(brew --prefix)/bin" # optional: the `rec` command-line tool
 ```
 
-Requirements: macOS 15.2 or newer, Apple silicon or Intel. Optional runtime
-tools via Homebrew: `ffmpeg` (audio clean-up) and `whisperkit-cli`
-(transcription). Recording itself needs nothing extra.
+### 3. First launch and permissions
 
-### First run: permissions
+Open **RecBar** from Spotlight or Applications. It appears in the Dock, and
+**⌃⌥R** opens its panel from anywhere. The first time you press Start, macOS asks
+for two permissions — grant both to *RecBar* in **System Settings → Privacy &
+Security**:
 
-macOS will ask for **Screen & System Audio Recording** and **Microphone**.
-Grant both to *RecBar* (and to your terminal app if you use `rec`) in
-System Settings → Privacy & Security, then relaunch. This happens once.
+- **Screen & System Audio Recording**
+- **Microphone**
+
+Then quit RecBar (panel → Quit) and open it again; screen-recording permission
+only takes effect after a relaunch. If you use the `rec` tool, macOS asks the
+same for your terminal app (Terminal, iTerm, …) the first time you run it.
+
+### 4. Check it works (optional)
+
+```sh
+make smoke
+```
+
+Records a few short test clips — it speaks through your speakers for about 30
+seconds, so don't run it during a call (it refuses if another app is using
+a microphone) — and verifies the files. All checks should pass.
+
+### Updating
+
+```sh
+cd recbar
+git pull
+make install-app
+make install PREFIX="$(brew --prefix)/bin"   # if you use the CLI
+```
+
+### Uninstalling
+
+```sh
+make uninstall-app
+make uninstall PREFIX="$(brew --prefix)/bin"
+```
+
+Your recordings in `~/Movies/recordings/` are not touched.
+
+<details>
+<summary><strong>Keep permissions across rebuilds (optional)</strong></summary>
+
+macOS ties the permissions to the app's code signature. Without a signing
+certificate the build is "ad-hoc" signed, so macOS asks again after every
+update. A free self-signed certificate fixes that; the Makefile uses it
+automatically once it exists:
+
+```sh
+openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=RecBar Dev" \
+  -addext "keyUsage=critical,digitalSignature" \
+  -addext "extendedKeyUsage=critical,codeSigning" -keyout key.pem -out cert.pem
+openssl pkcs12 -export -legacy -inkey key.pem -in cert.pem -name "RecBar Dev" \
+  -out recbar-dev.p12 -passout pass:x
+security import recbar-dev.p12 -k ~/Library/Keychains/login.keychain-db -P x \
+  -T /usr/bin/codesign
+rm key.pem cert.pem recbar-dev.p12
+```
+
+The first build after that asks for your keychain password once — choose
+*Always Allow*. (`-legacy` matters: macOS can't read OpenSSL 3's default
+format.)
+
+</details>
+
+### Troubleshooting
+
+- **Start keeps asking for permission even though it's enabled** — the
+  permission belongs to an older build. Reset it, then grant it again:
+
+  ```sh
+  tccutil reset ScreenCapture sg.com.apptechsystem.recbar
+  tccutil reset Microphone sg.com.apptechsystem.recbar
+  ```
+
+- **No RecBar icon in the menu bar** — a crowded menu bar hides it. Use the
+  Dock icon or ⌃⌥R instead.
+- **`rec: command not found`** — the install folder isn't on your `PATH`;
+  run `echo $PATH` and install with a `PREFIX` that is listed there.
+- **Clean-up, export or transcription fail with "ffmpeg not found" /
+  "whisperkit-cli not found"** — install them with Homebrew (step 1).
 
 ## Using RecBar
 
@@ -188,7 +273,7 @@ make smoke     # ~1 minute; plays a few seconds of speech through your speakers
 
 Records for real and checks the results with ffprobe — track layout, levels,
 echo cancellation (mic/speaker correlation), window sizing, normalize, export,
-and transcription of known speech. 18 checks; see
+and transcription of known speech, plus back-to-back recording. 24 checks; see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## How it works
@@ -210,5 +295,5 @@ record a conversation.
 
 ## License
 
-[MIT](LICENSE). Built by [Kai](https://github.com/<you>) at
-[AppTech System](https://apptechsystem.com.sg).
+[MIT](LICENSE). Built by [Kai](https://github.com/Apptechkai) at
+[AppTech System](https://apptechsystem.com).
