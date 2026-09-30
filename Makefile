@@ -8,6 +8,10 @@ SIGN ?= $(shell security find-identity -p codesigning 2>/dev/null | grep -q '"Re
 
 .PHONY: build install uninstall app install-app uninstall-app clean smoke
 
+# Version stamp for the app bundle (empty outside a git checkout).
+BUILD_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null)
+BUILD_DIRTY  ?= $(shell git diff --quiet HEAD 2>/dev/null && echo no || echo yes)
+
 # End-to-end check of the real capture engine (plays sound; ~1 minute).
 smoke: build
 	@bash scripts/smoke.sh
@@ -29,6 +33,13 @@ app: build
 	install .build/release/RecBar $(APP)/Contents/MacOS/RecBar
 	cp Sources/RecBar/Info.plist $(APP)/Contents/Info.plist
 	cp Resources/RecBar.icns $(APP)/Contents/Resources/RecBar.icns
+	@# Stamp which commit this build came from, for Settings → Check for Updates.
+	@if [ -n "$(BUILD_COMMIT)" ]; then \
+		plutil -insert RecBarCommit -string "$(BUILD_COMMIT)" $(APP)/Contents/Info.plist; \
+		plutil -insert RecBarDirty -string "$(BUILD_DIRTY)" $(APP)/Contents/Info.plist; \
+	fi
+	@plutil -insert RecBarBuildDate -string "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" $(APP)/Contents/Info.plist
+	@plutil -insert RecBarSourceDir -string "$(CURDIR)" $(APP)/Contents/Info.plist
 	codesign --force -s "$(SIGN)" $(APP)
 
 install-app: app

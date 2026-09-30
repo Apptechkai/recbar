@@ -29,5 +29,7 @@
   burned in.
 - Recordings folder setting: RecBar Settings (⌘,) and `rec folder`, shared;
   falls back to ~/Movies/recordings with a warning if the folder is missing.
+- Settings → Check for Updates (only when clicked) with Update Now for
+  installer-managed copies; builds are stamped with their git commit.
 - `rec` CLI: `start` / `stop` / `status` / `windows` / `mics` / `normalize`
   / `transcribe` / `export`.

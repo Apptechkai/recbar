@@ -6,6 +6,7 @@ import SwiftUI
 /// shared with the `rec` CLI via RecSettings.
 struct SettingsView: View {
     @ObservedObject var controller = RecController.shared
+    @ObservedObject var updater = Updater.shared
     @State private var folder = RecPaths.resolveRecordingsDirectory()
     @State private var isCustom = RecSettings.customRecordingsFolder != nil
     @State private var error: String?
@@ -61,6 +62,8 @@ struct SettingsView: View {
                 Text("Off: the window hides when you click another app. Bring it back from the Dock or with ⌃⌥R.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+
+            UpdatesSection(updater: updater)
         }
         .formStyle(.grouped)
         .frame(width: 500)
@@ -105,6 +108,118 @@ struct SettingsView: View {
             .map { "\(home)/\($0)" }
         return guarded.contains { path == $0 || path.hasPrefix($0 + "/") }
             || path.hasPrefix("/Volumes/")
+    }
+}
+
+/// Settings → Updates: installed version, Check for Updates, what's new,
+/// and Update Now (or manual commands for self-built copies).
+private struct UpdatesSection: View {
+    @ObservedObject var updater: Updater
+    @ObservedObject var controller = RecController.shared
+    @ObservedObject var processor = PostProcessor.shared
+
+    var body: some View {
+        SwiftUI.Section {
+            LabeledContent("Installed version") {
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(updater.build.shortCommit).monospaced().textSelection(.enabled)
+                    if let date = updater.build.buildDate {
+                        Text("built \(date.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if updater.build.hasLocalChanges {
+                Text("This copy was built with local changes to the source.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 10) {
+                Button("Check for Updates") { Task { await updater.check() } }
+                    .disabled(updater.isBusy)
+                status
+                Spacer(minLength: 0)
+            }
+
+            if case .available(let count, let changes) = updater.phase {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(changes.prefix(5)) { change in
+                        Text("• \(change.summary)").font(.caption).lineLimit(2)
+                    }
+                    if count > min(changes.count, 5) {
+                        Text("…and \(count - min(changes.count, 5)) more")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                updateAction
+            }
+        } header: {
+            Text("Updates")
+        } footer: {
+            Text("RecBar only contacts GitHub when you click Check for Updates.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private var status: some View {
+        switch updater.phase {
+        case .idle:
+            EmptyView()
+        case .checking:
+            ProgressView().controlSize(.small)
+            Text("Checking…").font(.caption).foregroundStyle(.secondary)
+        case .upToDate(let checkedAt):
+            Label("You're up to date (checked \(checkedAt.formatted(date: .omitted, time: .shortened)))",
+                  systemImage: "checkmark.circle.fill")
+                .font(.caption).foregroundStyle(.green)
+        case .available(let count, _):
+            Label("\(count) update\(count == 1 ? "" : "s") available", systemImage: "arrow.down.circle.fill")
+                .font(.caption.weight(.medium)).foregroundStyle(.blue)
+        case .aheadOfGitHub:
+            Text("This build is newer than GitHub (a development build).")
+                .font(.caption).foregroundStyle(.secondary)
+        case .updating:
+            ProgressView().controlSize(.small)
+            Text("Updating… RecBar restarts when it's done (about a minute).")
+                .font(.caption).foregroundStyle(.secondary)
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 2) {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Show Install Log") { updater.revealLog() }
+                    .buttonStyle(.link).font(.caption)
+            }
+        }
+    }
+
+    @ViewBuilder private var updateAction: some View {
+        if updater.build.isInstallerManaged {
+            HStack(spacing: 10) {
+                Button("Update Now") { updater.updateNow() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(updater.blockedReason != nil)
+                Text(updater.blockedReason ?? "Downloads the new version, rebuilds it and restarts RecBar.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("You built RecBar from your own copy of the source. To update it, run:")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text(updater.manualUpdateCommand)
+                        .font(.caption.monospaced()).textSelection(.enabled)
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 0)
+                    Button("Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(updater.manualUpdateCommand, forType: .string)
+                    }
+                    .controlSize(.small)
+                }
+            }
+        }
     }
 }
 

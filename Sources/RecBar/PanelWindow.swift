@@ -41,9 +41,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         HotKey.register()  // ⌃⌥R → show panel
         Task { @MainActor in
             PanelWindow.shared.show()  // Dock launch → panel
-            // `open -a RecBar --args --show-settings` opens Settings directly.
-            if CommandLine.arguments.contains("--show-settings") {
+            // `open -a RecBar --args --show-settings` opens Settings directly;
+            // --check-updates / --update-now drive the Updates section (used
+            // to test updating end to end without clicking).
+            let args = CommandLine.arguments
+            if args.contains("--show-settings") || args.contains("--check-updates") {
                 SettingsWindow.shared.show()
+            }
+            if args.contains("--check-updates") || args.contains("--update-now") {
+                await Updater.shared.check()
+                if args.contains("--update-now"), case .available = Updater.shared.phase {
+                    Updater.shared.updateNow()
+                }
             }
         }
     }

@@ -159,8 +159,8 @@ a microphone) — and verifies the files. All checks should pass.
 
 ### Updating
 
-Installed with the one-command installer? Just run that line again. For a
-manual install:
+Installed with the one-command installer? Use **Settings → Check for Updates →
+Update Now** in RecBar, or run the install line again. For a manual install:
 
 ```sh
 cd recbar
@@ -243,7 +243,10 @@ Click the Dock icon or press **⌃⌥R** to open the panel:
    recordings queue up and are processed one at a time.
 
 **Settings** (gear icon in the panel, or ⌘,) — choose the folder new
-recordings are saved to; it shows the free space there. If the folder isn't
+recordings are saved to; it shows the free space there. **Check for Updates**
+lists what's new on GitHub; if you installed with the one-command installer,
+**Update Now** rebuilds RecBar and restarts it (not while recording or
+cleaning up). If the folder isn't
 available when you press Start (say an external drive is unplugged), RecBar
 records to `~/Movies/recordings` instead and tells you, rather than failing.
 
@@ -337,10 +340,11 @@ source catalog, audio processing, and transcription, with no UI; `rec` and
 
 ## Privacy
 
-RecBar makes no network requests. Recordings and transcripts stay in
-`~/Movies/recordings/` (or wherever you point it). The only download is the
-WhisperKit model the first time you transcribe, and only if you use that
-feature. Please check your local laws and let participants know when you
+RecBar doesn't phone home. Recordings and transcripts stay in
+`~/Movies/recordings/` (or wherever you point it). It only goes online in two
+cases, both started by you: **Check for Updates** in Settings (one request to
+GitHub's public API) and the WhisperKit model download the first time you
+transcribe. Please check your local laws and let participants know when you
 record a conversation.
 
 ## License

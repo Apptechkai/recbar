@@ -192,41 +192,6 @@ final class LevelStore: @unchecked Sendable {
 let processingLogURL = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Logs/RecBar/processing.log")
 
-/// Launches `rec <args>` fully detached: its own session (so Ctrl+C in this
-/// terminal can't reach it), default signal handling, output to the log.
-func spawnDetached(_ args: [String], log: URL) -> pid_t? {
-    guard let executable = Bundle.main.executablePath else { return nil }
-    try? FileManager.default.createDirectory(at: log.deletingLastPathComponent(),
-                                             withIntermediateDirectories: true)
-
-    var fileActions: posix_spawn_file_actions_t?
-    posix_spawn_file_actions_init(&fileActions)
-    defer { posix_spawn_file_actions_destroy(&fileActions) }
-    posix_spawn_file_actions_addopen(&fileActions, 0, "/dev/null", O_RDONLY, 0)
-    posix_spawn_file_actions_addopen(&fileActions, 1, log.path, O_WRONLY | O_CREAT | O_APPEND, 0o644)
-    posix_spawn_file_actions_adddup2(&fileActions, 1, 2)
-
-    var attributes: posix_spawnattr_t?
-    posix_spawnattr_init(&attributes)
-    defer { posix_spawnattr_destroy(&attributes) }
-    // We ignore SIGINT/SIGTERM while recording; the child must not inherit that.
-    var defaultSignals = sigset_t()
-    sigemptyset(&defaultSignals)
-    sigaddset(&defaultSignals, SIGINT)
-    sigaddset(&defaultSignals, SIGTERM)
-    posix_spawnattr_setsigdefault(&attributes, &defaultSignals)
-    var emptyMask = sigset_t()
-    sigemptyset(&emptyMask)
-    posix_spawnattr_setsigmask(&attributes, &emptyMask)
-    posix_spawnattr_setflags(&attributes,
-                             Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK))
-
-    let argv: [UnsafeMutablePointer<CChar>?] = ([executable] + args).map { strdup($0) } + [nil]
-    defer { argv.forEach { free($0) } }
-    var pid: pid_t = 0
-    let status = posix_spawn(&pid, executable, &fileActions, &attributes, argv, environ)
-    return status == 0 ? pid : nil
-}
 
 func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?,
                   micQuery: String?, normalize: Bool, meter: Bool, echoCancel: Bool,
@@ -334,7 +299,8 @@ func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?,
     guard normalize else { exit(0) }
 
     if !waitForProcessing,
-       spawnDetached(["normalize", outputURL.path], log: processingLogURL) != nil {
+       spawnDetached(executable: Bundle.main.executablePath ?? CommandLine.arguments[0],
+                     arguments: ["normalize", outputURL.path], log: processingLogURL) != nil {
         print("  Audio clean-up is running in the background — you can start the next recording now.")
         print("  Progress: `rec status`   Log: \(processingLogURL.path)")
         exit(0)
