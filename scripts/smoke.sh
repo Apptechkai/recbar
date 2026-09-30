@@ -36,6 +36,13 @@ command -v ffprobe >/dev/null || { fail "ffprobe missing"; exit 1; }
 if [ -f /tmp/rec-cli.pid ] && kill -0 "$(cat /tmp/rec-cli.pid)" 2>/dev/null; then
   fail "a recording is already running — stop it first"; exit 1
 fi
+# This test speaks through the speakers; never do that into a live call.
+if [ "${SMOKE_FORCE:-0}" != 1 ] && swift scripts/mic-in-use.swift 2>/dev/null; then
+  fail "another app has a microphone open (on a call?) — this test plays speech through your speakers."
+  echo "        Rerun when you're free, or override with: SMOKE_FORCE=1 make smoke"
+  exit 1
+fi
+pass "no other app is using a microphone"
 HAVE_NUMPY=0; python3 -c "import numpy" 2>/dev/null && HAVE_NUMPY=1
 ALT_OUT=$(say -a '?' 2>/dev/null | awk 'NR==2{print $1}')   # a second output device, if any
 echo "  (sounds will play through your speakers for ~20 s)"

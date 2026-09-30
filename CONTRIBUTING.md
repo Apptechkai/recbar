@@ -47,7 +47,9 @@ cancellation keeping speaker audio off the mic, mic still hearing a control
 sound), a window capture (video sized to the window, all tracks, clean
 decode), normalize, export, and transcribe against known speech. It plays a
 few seconds of speech through your speakers and needs Screen Recording +
-Microphone permission for your terminal. CI runners have no screen or mic, so
+Microphone permission for your terminal. It refuses to start while another
+app has a microphone open (you're probably on a call); override with
+`SMOKE_FORCE=1 make smoke`. CI runners have no screen or mic, so
 this stays a local check; CI only builds.
 
 ## Pull requests
