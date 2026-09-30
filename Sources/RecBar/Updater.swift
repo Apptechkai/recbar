@@ -65,6 +65,7 @@ final class Updater: ObservableObject {
 
     func updateNow() {
         guard build.isInstallerManaged, blockedReason == nil else { return }
+        let source = UpdateCheck.installerSourceDirectory.path
         let script = UpdateCheck.installerSourceDirectory.appendingPathComponent("install.sh")
         guard FileManager.default.fileExists(atPath: script.path) else {
             phase = .failed("The installer isn't where RecBar expects it. Run the one-command install line from the README again.")
@@ -73,9 +74,13 @@ final class Updater: ObservableObject {
         // Apps launched from the Dock get a minimal PATH; the installer needs
         // Homebrew's to update ffmpeg / whisperkit-cli and the `rec` tool.
         let path = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-        guard let pid = spawnDetached(executable: "/bin/bash", arguments: [script.path],
+        // Pull first, then run the *new* install.sh, so fixes to the installer
+        // itself apply on this update rather than the next one. (If the pull
+        // fails, the installer handles it: it re-downloads the source.)
+        let command = "git -C \"$RECBAR_SRC\" pull --ff-only --quiet; exec /bin/bash \"$RECBAR_SRC/install.sh\""
+        guard let pid = spawnDetached(executable: "/bin/bash", arguments: ["-c", command],
                                       log: UpdateCheck.installLog,
-                                      extraEnvironment: ["PATH": path]) else {
+                                      extraEnvironment: ["PATH": path, "RECBAR_SRC": source]) else {
             phase = .failed("Couldn't start the installer.")
             return
         }

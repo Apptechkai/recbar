@@ -32,6 +32,9 @@ step() {
 
 have_brew() { command -v brew >/dev/null 2>&1; }
 
+# Note: `pkill -a` — macOS pkill skips its own ancestors by default, and when
+# RecBar's "Update Now" runs this script, RecBar *is* an ancestor.
+
 # Refuse while RecBar is busy: never cut off a recording or an audio clean-up.
 check_idle() {
   if [ -f /tmp/rec-cli.pid ] && kill -0 "$(cat /tmp/rec-cli.pid)" 2>/dev/null; then
@@ -45,7 +48,7 @@ check_idle() {
 uninstall() {
   check_idle
   say "Removing RecBar…"
-  pkill -x RecBar 2>/dev/null || true
+  pkill -a -x RecBar 2>/dev/null || true
   rm -rf /Applications/RecBar.app "$SRC"
   if have_brew; then rm -f "$(brew --prefix)/bin/rec"; fi
   say "RecBar removed. Your recordings in ~/Movies/recordings were not touched."
@@ -111,7 +114,7 @@ install() {
   # 5. Build and install.
   say "Building RecBar (a minute or two)…"
   step make -C "$SRC" build
-  pkill -x RecBar 2>/dev/null || true
+  pkill -a -x RecBar 2>/dev/null || true
   step make -C "$SRC" install-app
   if have_brew; then
     step make -C "$SRC" install PREFIX="$(brew --prefix)/bin"
