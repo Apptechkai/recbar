@@ -61,9 +61,6 @@ final class RecController: ObservableObject {
         }
     }
 
-    /// After Stop: loudness normalization in progress (Start stays disabled).
-    @Published private(set) var isFinalizing = false
-    @Published private(set) var finalizeFraction: Double?
 
     private var recorder: Recorder?
     private var timer: Timer?
@@ -110,7 +107,9 @@ final class RecController: ObservableObject {
     }
 
     func start() async {
-        guard !isRecording, !isFinalizing else { return }
+        // Clean-up of earlier recordings may still be running — that's fine,
+        // it's a separate background queue.
+        guard !isRecording else { return }
         if let pid = PidFile.runningPID(),
            pid != ProcessInfo.processInfo.processIdentifier {
             alert("Another recording is already running (pid \(pid)).",
@@ -189,7 +188,9 @@ final class RecController: ObservableObject {
         }
     }
 
-    func stop(streamError: String? = nil) async {
+    /// Stops and finalizes the file (about a second), then hands the audio
+    /// clean-up to the background queue so a new recording can start at once.
+    func stop(streamError: String? = nil, enqueueProcessing: Bool = true) async {
         guard let recorder else { return }
         self.recorder = nil
         timer?.invalidate()
@@ -202,28 +203,15 @@ final class RecController: ObservableObject {
             finalizeError = "\(error)"
         }
 
-        // Pidfile goes first so `rec stop` returns as soon as the file is
-        // safe, while normalization keeps running here.
         PidFile.remove()
         isRecording = false
         previewImage = nil
         NSApp.dockTile.badgeLabel = nil
         if finalizeError == nil {
             lastRecordingURL = recorder.outputURL
-        }
-
-        if finalizeError == nil, normalizeAudio {
-            isFinalizing = true
-            finalizeFraction = nil
-            do {
-                try await AudioNormalizer.normalize(fileURL: recorder.outputURL) { [weak self] fraction in
-                    Task { @MainActor in self?.finalizeFraction = fraction }
-                }
-            } catch {
-                alert("Audio normalization skipped.", detail: "\(error)")
+            if normalizeAudio, enqueueProcessing {
+                PostProcessor.shared.enqueue(recorder.outputURL)
             }
-            isFinalizing = false
-            finalizeFraction = nil
         }
 
         if let finalizeError {
@@ -234,11 +222,46 @@ final class RecController: ObservableObject {
         }
     }
 
+    /// Every quit path (panel button, Dock menu, ⌘Q) goes through
+    /// AppDelegate.applicationShouldTerminate → confirmQuit / shutdownForQuit.
     func quit() {
-        Task { @MainActor in
-            await stop()
-            NSApp.terminate(nil)
+        NSApp.terminate(nil)
+    }
+
+    /// Asks before quitting if a recording or clean-up is in progress.
+    /// Returns false if the user chose to keep RecBar running.
+    func confirmQuit() -> Bool {
+        let processor = PostProcessor.shared
+        guard isRecording || processor.isBusy else { return true }
+
+        let alert = NSAlert()
+        if isRecording {
+            alert.messageText = "A recording is in progress."
+            alert.informativeText = "Quitting stops it and saves the file"
+                + (processor.isBusy || normalizeAudio
+                   ? ", without the audio clean-up. You can run it later with `rec normalize`."
+                   : ".")
+            alert.addButton(withTitle: "Keep Recording")
+            alert.addButton(withTitle: "Stop and Quit")
+        } else {
+            let count = processor.pendingCount
+            alert.messageText = "\(count) recording\(count == 1 ? " is" : "s are") still being cleaned up."
+            alert.informativeText = """
+            Your recordings are already saved. If you quit now they keep their \
+            unprocessed audio; you can clean them up later with `rec normalize <file>`.
+            """
+            alert.addButton(withTitle: "Wait")
+            alert.addButton(withTitle: "Quit Anyway")
         }
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertSecondButtonReturn
+    }
+
+    /// Finalizes a running recording and stops background work before exit.
+    func shutdownForQuit() async {
+        if isRecording { await stop(enqueueProcessing: false) }
+        Transcriber.shared.cancel()
+        await PostProcessor.shared.cancelAll()
     }
 
     // MARK: - Permissions

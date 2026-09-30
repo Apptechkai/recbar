@@ -47,8 +47,10 @@ instead of guessed by a diarization model.
   hotkey (⌃⌥R) and a terminal-controllable CLI: `rec start`, `rec stop`.
 - **Crash-resilient files** — written in 5-second fragments, so a force-quit
   or kernel panic mid-meeting still leaves a playable recording.
-- **Audio clean-up on stop** — denoise, gentle compression, two-pass EBU R128
-  loudness normalization. Video is stream-copied, never re-encoded.
+- **Audio clean-up in the background** — denoise, gentle compression,
+  two-pass EBU R128 loudness normalization, run after Stop at low priority
+  while you're free to start the next recording. Video is stream-copied,
+  never re-encoded.
 - **Local transcription to `.srt`** with WhisperKit (large-v3 on the Neural
   Engine), speaker-labeled `[Me]` / `[Them]`; optional translate-to-English.
 - **Echo-cancelled microphone** — the mic is captured through macOS voice
@@ -107,8 +109,11 @@ Click the Dock icon or press **⌃⌥R** to open the panel:
 3. **Start Recording.** The panel shows elapsed time, level meters, and a live
    thumbnail; the Dock badge reads REC. Close the panel if you like —
    recording continues.
-4. **Stop.** Audio clean-up runs (about a minute per hour of recording), then
-   the file is in `~/Movies/recordings/`.
+4. **Stop.** The file is saved in `~/Movies/recordings/` within a second and
+   the panel is ready for the next recording straight away. Audio clean-up
+   runs in the background (about 2½ minutes per hour of recording, measured on
+   an M-series Mac); a strip in the panel shows its progress, and several
+   recordings queue up and are processed one at a time.
 
 **Transcribe:** *Transcribe File to Subtitles…* → pick any video/audio file →
 a `.srt` appears next to it, with a live progress bar. RecBar recordings get
@@ -133,7 +138,12 @@ rec export meeting.mov             # → meeting-share.mp4, one mixed audio trac
 ```
 
 Default output: `~/Movies/recordings/rec-YYYY-MM-DD-HHmmss.mov`. Both
-`Ctrl+C` and `rec stop` finalize the file cleanly.
+`Ctrl+C` and `rec stop` finalize the file cleanly and return immediately; the
+audio clean-up then continues as a detached background job, so you can
+`rec start` the next recording right away. `rec status` shows what's being
+processed, and output goes to `~/Library/Logs/RecBar/processing.log`. Jobs
+from the CLI and from RecBar share one queue and never run at the same time.
+Use `rec start --wait` if a script needs the processed file when `rec` exits.
 
 ## Working with the tracks
 

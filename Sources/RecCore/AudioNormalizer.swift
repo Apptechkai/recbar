@@ -5,10 +5,13 @@ import Foundation
 ///
 /// Meeting audio arrives quiet, uneven and noisy. Each audio track gets a
 /// podcast-style chain — high-pass, spectral denoise, (mic: small presence
-/// lift), gentle compression — then a two-pass *linear* EBU R128 normalization
-/// to −16 LUFS. Two passes matter: single-pass loudnorm is dynamic and pumps
-/// the noise floor up between words. Video is stream-copied, so this never
-/// touches picture quality.
+/// lift), gentle compression — then a two-pass *linear* EBU R128
+/// normalization to −16 LUFS: pass 1 measures integrated loudness with the
+/// `ebur128` meter (all tracks in parallel), pass 2 applies one fixed gain
+/// plus a peak limiter. Linear matters: single-pass dynamic normalization
+/// pumps the noise floor up between words. (ffmpeg's `loudnorm` does the same
+/// job but upsamples to 192 kHz internally, which made clean-up ~4× slower.)
+/// Video is stream-copied, so this never touches picture quality.
 public enum AudioNormalizer {
     public static let ffmpegPaths = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
 
@@ -22,34 +25,57 @@ public enum AudioNormalizer {
     /// Track 1 (mic): same plus a presence lift around 3.5 kHz for consonants.
     static let micChain =
         "highpass=f=80,afftdn=nf=-30,equalizer=f=3500:t=q:w=1.2:g=3,acompressor=threshold=-24dB:ratio=3:attack=5:release=120:makeup=3"
-    static let loudnormTarget = "I=-16:TP=-1.5:LRA=7"
+    /// Target integrated loudness (LUFS) — the usual level for spoken content.
+    static let targetLUFS = -16.0
+    /// Peak ceiling after gain: 0.84 ≈ −1.5 dBFS.
+    static let limiter = "alimiter=limit=0.84:level=disabled:attack=5:release=50"
+    /// Never boost more than this: a nearly silent track (muted mic) would
+    /// otherwise have its noise floor pushed up to speech level.
+    static let maxGainDB = 24.0
 
     /// Processes every audio track of `fileURL` in place. `progress` receives
-    /// 0…1 across both passes. On any failure the original file is left
-    /// untouched and the error is thrown.
+    /// 0…1 across both passes (the first call, 0, means "started" — before it
+    /// the job is waiting for another clean-up to finish). Runs at low
+    /// priority so it can overlap a new recording. Cancellable: cancelling
+    /// the task stops ffmpeg. On any failure or cancellation the original file
+    /// is left untouched.
     public static func normalize(fileURL: URL,
                                  progress: (@Sendable (Double) -> Void)? = nil) async throws {
         guard let ffmpeg = ffmpegPath else {
             throw RecError("ffmpeg not found — brew install ffmpeg (recording kept unprocessed)")
         }
 
+        let lock = try await ProcessingLock.acquire(label: fileURL.path)
+        defer { ProcessingLock.release(lock) }
+        progress?(0)
+
         let asset = AVURLAsset(url: fileURL)
         let duration = try await asset.load(.duration).seconds
         let audioTracks = try await asset.loadTracks(withMediaType: .audio)
         guard !audioTracks.isEmpty else { return }
 
-        // -- Pass 1: measure loudness per track (after its chain) --------------
-        var filters: [String] = []
-        for (index, _) in audioTracks.enumerated() {
-            let chain = index == 1 ? micChain : systemChain
-            if let measured = try await measure(ffmpeg: ffmpeg, file: fileURL, track: index, chain: chain) {
-                filters.append("\(chain),loudnorm=\(loudnormTarget):\(measured):linear=true")
-            } else {
+        // -- Pass 1: measure loudness of every track (after its chain), in parallel
+        let chains = audioTracks.indices.map { $0 == 1 ? micChain : systemChain }
+        let loudness = try await withThrowingTaskGroup(of: (Int, Double?).self) { group in
+            for (index, chain) in chains.enumerated() {
+                group.addTask {
+                    (index, try await measure(ffmpeg: ffmpeg, file: fileURL, track: index, chain: chain))
+                }
+            }
+            var results = [Double?](repeating: nil, count: chains.count)
+            for try await (index, value) in group { results[index] = value }
+            return results
+        }
+        progress?(0.3)
+
+        let filters: [String] = chains.enumerated().map { index, chain in
+            guard let measured = loudness[index] else {
                 // Silent track (e.g. window capture of an app that played no
                 // sound): nothing to normalize, just run the clean-up chain.
-                filters.append(chain)
+                return chain
             }
-            progress?(0.3 * Double(index + 1) / Double(audioTracks.count))
+            let gain = min(targetLUFS - measured, maxGainDB)
+            return "\(chain),volume=\(String(format: "%.2f", gain))dB,\(limiter)"
         }
 
         // -- Pass 2: apply, video copied, atomic swap --------------------------
@@ -71,10 +97,16 @@ public enum AudioNormalizer {
         }
         args.append(tmpURL.path)
 
-        let result = try await runFFmpeg(ffmpeg, args) { line in
-            guard duration > 0, line.hasPrefix("out_time_us="),
-                  let us = Double(line.dropFirst("out_time_us=".count)) else { return }
-            progress?(0.3 + 0.7 * min(us / 1_000_000 / duration, 1.0))
+        let result: (status: Int32, stderr: String)
+        do {
+            result = try await runFFmpeg(ffmpeg, args, qos: .utility) { line in
+                guard duration > 0, line.hasPrefix("out_time_us="),
+                      let us = Double(line.dropFirst("out_time_us=".count)) else { return }
+                progress?(0.3 + 0.7 * min(us / 1_000_000 / duration, 1.0))
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: tmpURL)   // cancelled mid-write
+            throw error
         }
         guard result.status == 0 else {
             try? FileManager.default.removeItem(at: tmpURL)
@@ -85,44 +117,39 @@ public enum AudioNormalizer {
         progress?(1.0)
     }
 
-    /// First loudnorm pass: returns the `measured_*` parameters for a linear
-    /// second pass, or nil if the track is (near-)silent and shouldn't be
-    /// normalized at all (loudnorm reports -inf, which pass 2 rejects).
-    private static func measure(ffmpeg: String, file: URL, track: Int, chain: String) async throws -> String? {
+    /// Pass 1: integrated loudness (LUFS) of one track after its clean-up
+    /// chain, or nil if the track is (near-)silent and shouldn't be
+    /// normalized at all (ebur128's gate reports −70 for silence).
+    private static func measure(ffmpeg: String, file: URL, track: Int, chain: String) async throws -> Double? {
         let result = try await runFFmpeg(ffmpeg, [
             "-v", "info", "-nostats", "-i", file.path, "-map", "0:a:\(track)",
-            "-af", "\(chain),loudnorm=\(loudnormTarget):print_format=json", "-f", "null", "-",
-        ])
+            "-af", "\(chain),ebur128=framelog=quiet", "-f", "null", "-",
+        ], qos: .utility)
+        // Summary block at the end:  "Integrated loudness:\n    I:   -23.4 LUFS"
         guard result.status == 0,
-              let open = result.stderr.range(of: "{", options: .backwards),
-              let close = result.stderr.range(of: "}", range: open.upperBound..<result.stderr.endIndex),
-              let json = try? JSONSerialization.jsonObject(
-                with: Data(result.stderr[open.lowerBound...close.upperBound].utf8)) as? [String: Any]
+              let summary = result.stderr.range(of: "Integrated loudness:", options: .backwards),
+              let line = result.stderr[summary.upperBound...]
+                .split(separator: "\n").first(where: { $0.contains("I:") }),
+              let value = line.split(separator: " ").compactMap({ Double($0) }).first
         else {
             throw RecError("loudness measurement failed on track \(track + 1): \(result.stderr.suffix(200))")
         }
-        // ffmpeg prints numbers as strings, and "-inf" for silence.
-        func number(_ key: String) -> Double? {
-            let value = json[key]
-            if let d = value as? Double { return d.isFinite ? d : nil }
-            if let s = value as? String, let d = Double(s), d.isFinite { return d }
-            return nil
-        }
-        guard let i = number("input_i"), i > -70,
-              let tp = number("input_tp"), let lra = number("input_lra"),
-              let thresh = number("input_thresh"), let offset = number("target_offset")
-        else { return nil }
-        return "measured_I=\(i):measured_TP=\(tp):measured_LRA=\(lra):measured_thresh=\(thresh):offset=\(offset)"
+        return value.isFinite && value > -69.5 ? value : nil
     }
 
     /// Runs ffmpeg, streaming stdout lines (for `-progress pipe:1`) and
     /// collecting stderr. Shared by the normalizer and the share exporter.
+    /// Cancelling the calling task terminates ffmpeg and throws
+    /// CancellationError. `qos: .utility` keeps background work on the
+    /// efficiency cores, out of the way of a live recording.
     static func runFFmpeg(_ ffmpeg: String, _ args: [String],
+                          qos: QualityOfService = .userInitiated,
                           onStdoutLine: (@Sendable (String) -> Void)? = nil)
         async throws -> (status: Int32, stderr: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: ffmpeg)
         process.arguments = args
+        process.qualityOfService = qos
         let stdout = Pipe()
         let stderr = Pipe()
         process.standardOutput = stdout
@@ -136,14 +163,28 @@ public enum AudioNormalizer {
             }
         }
 
-        try process.run()
-        // Drain stderr concurrently so a chatty ffmpeg can't block on a full pipe.
-        let stderrData = Task.detached { stderr.fileHandleForReading.readDataToEndOfFile() }
-        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-            process.terminationHandler = { _ in c.resume() }
+        // Handler installed before launch so a very short run can't finish
+        // before we're listening.
+        var stderrTask: Task<Data, Never>?
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
+                process.terminationHandler = { _ in c.resume() }
+                do {
+                    try process.run()
+                } catch {
+                    process.terminationHandler = nil
+                    c.resume(throwing: error)
+                    return
+                }
+                // Drain stderr concurrently so a chatty ffmpeg can't block on a full pipe.
+                stderrTask = Task.detached { stderr.fileHandleForReading.readDataToEndOfFile() }
+            }
+        } onCancel: {
+            process.terminate()
         }
         stdout.fileHandleForReading.readabilityHandler = nil
-        let text = String(data: await stderrData.value, encoding: .utf8) ?? ""
+        let text = String(data: await stderrTask?.value ?? Data(), encoding: .utf8) ?? ""
+        if Task.isCancelled { throw CancellationError() }
         return (process.terminationStatus, text)
     }
 }

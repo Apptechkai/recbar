@@ -13,7 +13,12 @@
 - Audio-only mode (`--audio-only`).
 - Crash-resilient writing (5-second movie fragments).
 - On-stop audio clean-up: high-pass, spectral denoise, presence lift on the
-  mic, gentle compression, two-pass linear EBU R128 normalization to −16 LUFS.
+  mic, gentle compression, two-pass linear EBU R128 normalization to −16 LUFS
+  (ebur128 measurement + gain + limiter, ~2½ min per hour of recording).
+- Clean-up runs in the background after Stop, one job at a time across the
+  CLI and RecBar, at low priority — the next recording can start immediately.
+  `rec start --wait` to process in the foreground; `rec status` shows the
+  current job; quitting RecBar mid-job keeps the original audio intact.
 - Local transcription to `.srt` via WhisperKit (large-v3 by default), with
   `[Me]`/`[Them]` speaker labels for RecBar recordings; optional translate
   to English.

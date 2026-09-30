@@ -50,6 +50,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Closing the panel must not quit — recording continues in the background.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// Every quit path (panel button, Dock menu, ⌘Q, logout) lands here:
+    /// confirm if a recording or clean-up is running, then finalize the file
+    /// and stop background work before exiting.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let proceed = MainActor.assumeIsolated { RecController.shared.confirmQuit() }
+        guard proceed else { return .terminateCancel }
+        Task { @MainActor in
+            await RecController.shared.shutdownForQuit()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
 }
 
 /// Global hotkey via Carbon — works without Accessibility permission, unlike

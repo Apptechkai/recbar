@@ -30,6 +30,7 @@ struct PanelView: View {
     @ObservedObject var controller: RecController
     @ObservedObject var transcriber: Transcriber
     @ObservedObject var exporter = Exporter.shared
+    @ObservedObject var processor = PostProcessor.shared
     @State private var optionsExpanded = false
 
     var body: some View {
@@ -38,11 +39,12 @@ struct PanelView: View {
             Section(title: "Record", icon: "record.circle") {
                 if controller.isRecording {
                     recordingLive
-                } else if controller.isFinalizing {
-                    finalizing
                 } else {
                     recordSetup
                 }
+            }
+            if processor.isBusy || !processor.failures.isEmpty || processor.lastFinished != nil {
+                processingStrip
             }
             Section(title: "After recording", icon: "wand.and.stars") {
                 transcribeRow
@@ -72,9 +74,6 @@ struct PanelView: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(Capsule().fill(.red))
-        } else if controller.isFinalizing {
-            Label("Finalizing", systemImage: "hourglass")
-                .font(.caption).foregroundStyle(.secondary)
         } else {
             Text("Ready").font(.caption).foregroundStyle(.secondary)
         }
@@ -136,7 +135,7 @@ struct PanelView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Toggle("Audio only (no video)", isOn: $controller.audioOnly)
                     Toggle("Echo cancellation", isOn: $controller.echoCancellation)
-                    Toggle("Clean up + normalize audio on stop", isOn: $controller.normalizeAudio)
+                    Toggle("Clean up audio after stop (in background)", isOn: $controller.normalizeAudio)
                 }
                 .toggleStyle(.checkbox)
                 .font(.callout)
@@ -149,8 +148,9 @@ struct PanelView: View {
                     Echo cancellation keeps the meeting audio coming out of your speakers \
                     off your mic track (the same processing FaceTime uses).
 
-                    Clean-up runs after you stop: denoise, gentle compression, and loudness \
-                    normalization of each audio track. Video is never re-encoded.
+                    Clean-up runs in the background after you stop: denoise, gentle \
+                    compression, and loudness normalization of each audio track. Video is \
+                    never re-encoded, and you can start the next recording right away.
                     """)
                 }
             }
@@ -217,20 +217,70 @@ struct PanelView: View {
         }
     }
 
-    private var finalizing: some View {
+    // MARK: Background clean-up
+
+    /// Shown only while clean-ups are queued/running, or to report the last
+    /// result. Never blocks the Record card.
+    private var processingStrip: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Cleaning up + normalizing audio…").font(.callout)
-            if let fraction = controller.finalizeFraction {
-                HStack(spacing: 8) {
-                    ProgressView(value: fraction)
-                    Text("\(Int(fraction * 100))%")
-                        .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+            if let job = processor.current {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Cleaning up audio").font(.callout.weight(.medium))
+                    Text(job.url.lastPathComponent)
+                        .font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 0)
+                    InfoButton("""
+                    Runs in the background after each recording: denoise, gentle \
+                    compression and loudness normalization of both audio tracks. \
+                    The recording is already saved and playable — this only improves \
+                    its audio, and you can start the next recording right away.
+                    """)
                 }
-            } else {
-                ProgressView().progressViewStyle(.linear)
+                if let fraction = processor.fraction {
+                    HStack(spacing: 8) {
+                        ProgressView(value: fraction)
+                        Text("\(Int(fraction * 100))%")
+                            .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                } else {
+                    ProgressView().progressViewStyle(.linear)
+                }
+                if !processor.waiting.isEmpty {
+                    Caption("\(processor.waiting.count) more queued")
+                }
+            } else if let done = processor.lastFinished {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    Text("Audio cleaned up").font(.callout)
+                    Text(done.lastPathComponent)
+                        .font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 0)
+                    Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([done]) }
+                        .controlSize(.small)
+                    IconButton("xmark", help: "Dismiss") { processor.dismissFinished() }
+                }
             }
-            Caption("The recording is already saved; this improves its audio.")
+            ForEach(processor.failures) { failure in
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Clean-up skipped: \(failure.url.lastPathComponent)")
+                            .font(.caption.weight(.medium)).lineLimit(1).truncationMode(.middle)
+                        Text("Recording is fine, original audio kept. \(failure.message)")
+                            .font(.caption2).foregroundStyle(.secondary).lineLimit(3)
+                            .textSelection(.enabled)
+                    }
+                    Spacer(minLength: 0)
+                    IconButton("xmark", help: "Dismiss") { processor.dismiss(failure) }
+                }
+            }
         }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
     }
 
     // MARK: After recording
@@ -319,8 +369,7 @@ struct PanelView: View {
                 .toggleStyle(.checkbox).font(.caption)
             Spacer()
             Button("Quit") {
-                transcriber.cancel()
-                controller.quit()
+                controller.quit()   // confirms if recording / cleaning up
             }
             .controlSize(.small)
         }

@@ -24,7 +24,10 @@ func usage() -> Never {
         --audio-only     | -a  Skip the screen: record just system audio + mic
                                (still 2 separate tracks, ~115 MB/hour).
         --no-normalize         Skip the speech clean-up + loudness normalization
-                               that runs on stop.
+                               that runs after stop.
+        --wait                 Run that clean-up in the foreground and exit only
+                               when it's done (default: it runs in the
+                               background so you can record again at once).
         --no-echo-cancel       Capture the mic raw instead of through macOS
                                voice processing (echo cancellation + noise
                                suppression, which keeps the meeting audio
@@ -182,8 +185,49 @@ final class LevelStore: @unchecked Sendable {
     }
 }
 
+/// Where background clean-up jobs write their output.
+let processingLogURL = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Library/Logs/RecBar/processing.log")
+
+/// Launches `rec <args>` fully detached: its own session (so Ctrl+C in this
+/// terminal can't reach it), default signal handling, output to the log.
+func spawnDetached(_ args: [String], log: URL) -> pid_t? {
+    guard let executable = Bundle.main.executablePath else { return nil }
+    try? FileManager.default.createDirectory(at: log.deletingLastPathComponent(),
+                                             withIntermediateDirectories: true)
+
+    var fileActions: posix_spawn_file_actions_t?
+    posix_spawn_file_actions_init(&fileActions)
+    defer { posix_spawn_file_actions_destroy(&fileActions) }
+    posix_spawn_file_actions_addopen(&fileActions, 0, "/dev/null", O_RDONLY, 0)
+    posix_spawn_file_actions_addopen(&fileActions, 1, log.path, O_WRONLY | O_CREAT | O_APPEND, 0o644)
+    posix_spawn_file_actions_adddup2(&fileActions, 1, 2)
+
+    var attributes: posix_spawnattr_t?
+    posix_spawnattr_init(&attributes)
+    defer { posix_spawnattr_destroy(&attributes) }
+    // We ignore SIGINT/SIGTERM while recording; the child must not inherit that.
+    var defaultSignals = sigset_t()
+    sigemptyset(&defaultSignals)
+    sigaddset(&defaultSignals, SIGINT)
+    sigaddset(&defaultSignals, SIGTERM)
+    posix_spawnattr_setsigdefault(&attributes, &defaultSignals)
+    var emptyMask = sigset_t()
+    sigemptyset(&emptyMask)
+    posix_spawnattr_setsigmask(&attributes, &emptyMask)
+    posix_spawnattr_setflags(&attributes,
+                             Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK))
+
+    let argv: [UnsafeMutablePointer<CChar>?] = ([executable] + args).map { strdup($0) } + [nil]
+    defer { argv.forEach { free($0) } }
+    var pid: pid_t = 0
+    let status = posix_spawn(&pid, executable, &fileActions, &attributes, argv, environ)
+    return status == 0 ? pid : nil
+}
+
 func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?,
-                  micQuery: String?, normalize: Bool, meter: Bool, echoCancel: Bool) async {
+                  micQuery: String?, normalize: Bool, meter: Bool, echoCancel: Bool,
+                  waitForProcessing: Bool) async {
     if let pid = PidFile.runningPID() {
         fail("A recording is already running (pid \(pid)). Stop it with `rec stop`.")
     }
@@ -277,24 +321,32 @@ func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?,
     } catch {
         fail("\(error)")
     }
-    // File is safe now; release the pidfile so `rec stop` returns promptly
-    // even though normalization may run for a minute on long meetings.
+    // File is safe now; release the pidfile so `rec stop` returns and a new
+    // `rec start` can begin immediately.
     PidFile.remove()
+    print("✔ Saved \(outputURL.path)  (\(formatDuration(recorder.elapsed)), \(fileSizeString(outputURL)))")
 
-    if normalize {
-        print("  cleaning up + normalizing audio…")
-        let lastShown = LockedValue(-1)
-        do {
-            try await AudioNormalizer.normalize(fileURL: outputURL) { fraction in
-                let percent = Int(fraction * 100) / 10 * 10
-                if lastShown.exchange(percent) != percent { print("  … \(percent)%") }
-            }
-        } catch {
-            print("  ⚠︎ \(error) — original audio kept")
-        }
+    guard normalize else { exit(0) }
+
+    if !waitForProcessing,
+       spawnDetached(["normalize", outputURL.path], log: processingLogURL) != nil {
+        print("  Audio clean-up is running in the background — you can start the next recording now.")
+        print("  Progress: `rec status`   Log: \(processingLogURL.path)")
+        exit(0)
     }
 
-    print("✔ Saved \(outputURL.path)  (\(formatDuration(recorder.elapsed)), \(fileSizeString(outputURL)))")
+    // --wait, or the background launch failed: process here.
+    print("  cleaning up + normalizing audio…")
+    let lastShown = LockedValue(-1)
+    do {
+        try await AudioNormalizer.normalize(fileURL: outputURL) { fraction in
+            let percent = Int(fraction * 100) / 10 * 10
+            if lastShown.exchange(percent) != percent { print("  … \(percent)%") }
+        }
+        print("✔ Audio cleaned up  (\(fileSizeString(outputURL)))")
+    } catch {
+        print("  ⚠︎ \(error) — original audio kept")
+    }
     exit(0)
 }
 
@@ -332,17 +384,37 @@ func commandNormalize(path: String) async {
     guard FileManager.default.fileExists(atPath: url.path) else {
         fail("No such file: \(url.path)")
     }
-    print("Cleaning up + normalizing audio in \(url.lastPathComponent)…")
-    let lastShown = LockedValue(-1)
-    do {
+    let stamp = ISO8601DateFormatter().string(from: Date())
+    print("[\(stamp)] Cleaning up + normalizing audio in \(url.lastPathComponent)…")
+    if let other = ProcessingLock.currentJob() {
+        print("  waiting for the clean-up of \(URL(fileURLWithPath: other).lastPathComponent) to finish…")
+    }
+
+    // Ctrl+C / kill stops ffmpeg cleanly; the original file stays intact.
+    let job = Task {
+        let lastShown = LockedValue(-1)
         try await AudioNormalizer.normalize(fileURL: url) { fraction in
             let percent = Int(fraction * 100) / 10 * 10
             if lastShown.exchange(percent) != percent { print("  … \(percent)%") }
         }
+    }
+    signal(SIGINT, SIG_IGN)
+    signal(SIGTERM, SIG_IGN)
+    let signalQueue = DispatchQueue(label: "rec.normalize.signals")
+    let sources = [SIGINT, SIGTERM].map { DispatchSource.makeSignalSource(signal: $0, queue: signalQueue) }
+    for source in sources {
+        source.setEventHandler { job.cancel() }
+        source.resume()
+    }
+
+    do {
+        try await job.value
+    } catch is CancellationError {
+        fail("Cancelled — \(url.lastPathComponent) keeps its original audio.")
     } catch {
         fail("\(error)")
     }
-    print("✔ Done  (\(fileSizeString(url)))")
+    print("✔ Done  \(url.lastPathComponent)  (\(fileSizeString(url)))")
 }
 
 func commandTranscribe(path: String, translate: Bool) async {
@@ -396,9 +468,16 @@ func commandStatus() {
     } else {
         print("Not recording.")
     }
+    if let job = ProcessingLock.currentJob() {
+        print("⟳ Cleaning up audio: \(URL(fileURLWithPath: job).lastPathComponent)")
+    }
 }
 
 // MARK: - Entry
+
+// Line-buffer stdout even when it's a file (background jobs log to
+// processing.log), so progress shows up as it happens.
+setvbuf(stdout, nil, _IOLBF, 0)
 
 let arguments = Array(CommandLine.arguments.dropFirst())
 switch arguments.first {
@@ -412,6 +491,8 @@ case "start":
     rest.removeAll { $0 == "--meter" }
     let echoCancel = !rest.contains("--no-echo-cancel")
     rest.removeAll { $0 == "--no-echo-cancel" }
+    let waitForProcessing = rest.contains("--wait")
+    rest.removeAll { $0 == "--wait" }
     func takeValue(_ long: String, _ short: String) -> String? {
         guard let flagIndex = rest.firstIndex(where: { $0 == long || $0 == short }) else { return nil }
         guard flagIndex + 1 < rest.count else { usage() }
@@ -424,7 +505,8 @@ case "start":
     if rest.count > 1 { usage() }
     await commandStart(outputPath: rest.first, audioOnly: audioOnly,
                        windowQuery: windowQuery, micQuery: micQuery,
-                       normalize: normalize, meter: meter, echoCancel: echoCancel)
+                       normalize: normalize, meter: meter, echoCancel: echoCancel,
+                       waitForProcessing: waitForProcessing)
 case "windows":
     await commandWindows()
 case "mics":

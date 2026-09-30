@@ -154,5 +154,44 @@ else
 fi
 
 # ----------------------------------------------------------------------------
+section "6. Back-to-back recordings (clean-up runs in the background)"
+B1="$WORK/b2b-1.mov"; B2="$WORK/b2b-2.mov"
+"$REC" start --audio-only "$B1" >"$WORK/b2b-1.log" 2>&1 &
+sleep 4
+say -v Samantha "First of two back to back recordings."
+T0=$(python3 -c 'import time;print(time.time())')
+"$REC" stop >/dev/null 2>&1
+"$REC" start --audio-only "$B2" >"$WORK/b2b-2.log" 2>&1 &
+for _ in $(seq 1 50); do
+  [ -f /tmp/rec-cli.pid ] && kill -0 "$(cat /tmp/rec-cli.pid)" 2>/dev/null && break
+  sleep 0.1
+done
+GAP=$(python3 -c "import time;print(f'{time.time()-$T0:.1f}')")
+if [ -f /tmp/rec-cli.pid ] && gt 3.5 "$GAP"; then
+  pass "next recording running ${GAP}s after stop"
+else
+  fail "next recording not running within 3.5s of stop (${GAP}s)"
+fi
+grep -q "running in the background" "$WORK/b2b-1.log" && pass "clean-up handed to background job" \
+  || fail "first recording didn't hand off its clean-up:"
+say -v Daniel "Second of two back to back recordings."
+"$REC" stop >/dev/null 2>&1
+DEADLINE=$(( $(date +%s) + 120 ))
+while pgrep -f "rec normalize $WORK" >/dev/null && [ "$(date +%s)" -lt "$DEADLINE" ]; do sleep 1; done
+if pgrep -f "rec normalize $WORK" >/dev/null; then
+  fail "background clean-up still running after 2 minutes"
+else
+  for f in "$B1" "$B2"; do
+    M=$(mean_db "$f" 0)
+    if ffmpeg -v error -i "$f" -f null - 2>/dev/null && gt "$M" -30 && gt -8 "$M"; then
+      pass "$(basename "$f") processed in background (system mean ${M} dB)"
+    else
+      fail "$(basename "$f") not processed (system mean ${M} dB)"
+    fi
+  done
+  ls -a "$WORK" | grep -q normalizing && fail "temp file left behind" || pass "no temp files left behind"
+fi
+
+# ----------------------------------------------------------------------------
 printf "\n\033[1mResult:\033[0m %d passed, %d failed, %d skipped   (artifacts in %s)\n" "$PASS" "$FAIL" "$SKIP" "$WORK"
 [ "$FAIL" = 0 ]
