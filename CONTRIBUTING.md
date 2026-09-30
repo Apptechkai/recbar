@@ -1,6 +1,6 @@
-# Contributing to RecBar
+# Contributing to Recall Bar
 
-Thanks for your interest. RecBar is a small, opinionated tool; contributions
+Thanks for your interest. Recall Bar (code name RecBar) is a small, opinionated tool; contributions
 that keep it small and opinionated are the most welcome.
 
 ## Ground rules
@@ -17,7 +17,7 @@ that keep it small and opinionated are the most welcome.
 ```sh
 make build            # swift build -c release
 make install          # CLI → ~/bin (PREFIX=... to change)
-make install-app      # RecBar.app → /Applications
+make install-app      # Recall Bar.app → /Applications
 ```
 
 Requires macOS 15.2+ and Xcode Command Line Tools. `ffmpeg` and
@@ -60,6 +60,6 @@ this stays a local check; CI only builds.
 
 ## Reporting bugs
 
-Include macOS version, how you started the recording (RecBar or `rec`), the
+Include macOS version, how you started the recording (Recall Bar or `rec`), the
 capture source (display / window / app), and `ffprobe` output of the file if
 the problem is in the recording itself.

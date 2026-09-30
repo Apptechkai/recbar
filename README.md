@@ -1,14 +1,16 @@
 <p align="center">
-  <img src="docs/icon.png" width="128" alt="RecBar icon">
+  <img src="docs/icon.png" width="128" alt="Recall Bar icon">
 </p>
 
-<h1 align="center">RecBar</h1>
+<h1 align="center">Recall Bar</h1>
 
 <p align="center">
   <strong>Headless meeting recorder for macOS.</strong><br>
   Records your screen, the meeting audio, and your microphone as <em>separate tracks</em> —
   no bot in the call, no overlay on your screen, nothing uploaded anywhere.
 </p>
+
+<p align="center"><sub>Formerly RecBar — the repository and the <code>rec</code> command keep that name.</sub></p>
 
 <p align="center">
   <a href="https://github.com/Apptechkai/recbar/actions"><img src="https://github.com/Apptechkai/recbar/actions/workflows/build.yml/badge.svg" alt="Build"></a>
@@ -19,7 +21,7 @@
 ---
 
 Most meeting recorders either send a bot into your call, upload your audio to
-someone's cloud, or draw a toolbar over the screen you're presenting. RecBar
+someone's cloud, or draw a toolbar over the screen you're presenting. Recall Bar
 does none of that. It sits in the Dock (or runs from a terminal), captures
 what you tell it to via Apple's ScreenCaptureKit, and writes one `.mov`:
 
@@ -63,12 +65,12 @@ instead of guessed by a diarization model.
   (other than the one-time model download for transcription, if you opt in).
 
 <p align="center">
-  <img src="docs/panel.png" width="360" alt="RecBar panel">
+  <img src="docs/panel.png" width="360" alt="Recall Bar panel">
 </p>
 
 ## Install
 
-RecBar is currently installed by building it from source. A signed download
+Recall Bar is currently installed by building it from source. A signed download
 is planned; until then, one command does everything.
 
 ### Quick install (one command)
@@ -82,7 +84,7 @@ curl -fsSL https://raw.githubusercontent.com/Apptechkai/recbar/main/install.sh |
 
 It never asks for your password. It installs Apple's command line tools if
 they're missing (click *Install* in the dialog that appears), adds the helper
-tools if you have [Homebrew](https://brew.sh), builds RecBar, puts it in
+tools if you have [Homebrew](https://brew.sh), builds Recall Bar, puts it in
 Applications and opens it. Then do the one manual step:
 [grant two permissions](#3-first-launch-and-permissions).
 
@@ -97,7 +99,7 @@ to know what you're running.
 
 > **Using ChatGPT or Claude to help?** Paste this into the chat:
 >
-> *"Help me install RecBar on my Mac. The official instructions are at
+> *"Help me install Recall Bar on my Mac. The official instructions are at
 > https://github.com/Apptechkai/recbar — I need to run one command in
 > Terminal. Walk me through opening Terminal and running it, then help me
 > grant the two permissions it mentions. Don't suggest any other commands or
@@ -129,21 +131,21 @@ without either.
 ```sh
 git clone https://github.com/Apptechkai/recbar.git
 cd recbar
-make install-app                          # RecBar.app → /Applications
+make install-app                          # Recall Bar.app → /Applications
 make install PREFIX="$(brew --prefix)/bin" # optional: the `rec` command-line tool
 ```
 
 ### 3. First launch and permissions
 
-Open **RecBar** from Spotlight or Applications. It appears in the Dock, and
+Open **Recall Bar** from Spotlight or Applications. It appears in the Dock, and
 **⌃⌥R** opens its panel from anywhere. The first time you press Start, macOS asks
-for two permissions — grant both to *RecBar* in **System Settings → Privacy &
+for two permissions — grant both to *Recall Bar* in **System Settings → Privacy &
 Security**:
 
 - **Screen & System Audio Recording**
 - **Microphone**
 
-Then quit RecBar (panel → Quit) and open it again; screen-recording permission
+Then quit Recall Bar (panel → Quit) and open it again; screen-recording permission
 only takes effect after a relaunch. If you use the `rec` tool, macOS asks the
 same for your terminal app (Terminal, iTerm, …) the first time you run it.
 
@@ -160,7 +162,7 @@ a microphone) — and verifies the files. All checks should pass.
 ### Updating
 
 Installed with the one-command installer? Use **Settings → Check for Updates →
-Update Now** in RecBar, or run the install line again. For a manual install:
+Update Now** in Recall Bar, or run the install line again. For a manual install:
 
 ```sh
 cd recbar
@@ -216,14 +218,14 @@ format.)
   tccutil reset Microphone sg.com.apptechsystem.recbar
   ```
 
-- **No RecBar icon in the menu bar** — a crowded menu bar hides it. Use the
+- **No Recall Bar icon in the menu bar** — a crowded menu bar hides it. Use the
   Dock icon or ⌃⌥R instead.
 - **`rec: command not found`** — the install folder isn't on your `PATH`;
   run `echo $PATH` and install with a `PREFIX` that is listed there.
 - **Clean-up, export or transcription fail with "ffmpeg not found" /
   "whisperkit-cli not found"** — install them with Homebrew (step 1).
 
-## Using RecBar
+## Using Recall Bar
 
 Click the Dock icon or press **⌃⌥R** to open the panel:
 
@@ -245,13 +247,13 @@ Click the Dock icon or press **⌃⌥R** to open the panel:
 **Settings** (gear icon in the panel, or ⌘,) — choose the folder new
 recordings are saved to; it shows the free space there. **Check for Updates**
 lists what's new on GitHub; if you installed with the one-command installer,
-**Update Now** rebuilds RecBar and restarts it (not while recording or
+**Update Now** rebuilds Recall Bar and restarts it (not while recording or
 cleaning up). If the folder isn't
-available when you press Start (say an external drive is unplugged), RecBar
+available when you press Start (say an external drive is unplugged), Recall Bar
 records to `~/Movies/recordings` instead and tells you, rather than failing.
 
 **Transcribe:** *Transcribe File to Subtitles…* → pick any video/audio file →
-a `.srt` appears next to it, with a live progress bar. RecBar recordings get
+a `.srt` appears next to it, with a live progress bar. Recall Bar recordings get
 `[Me]` / `[Them]` labels.
 
 ## Using the CLI
@@ -274,13 +276,13 @@ rec export meeting.mov             # → meeting-share.mp4, one mixed audio trac
 ```
 
 Default output: `~/Movies/recordings/rec-YYYY-MM-DD-HHmmss.mov` — change the
-folder with `rec folder <path>` (or in RecBar's Settings; they share the
+folder with `rec folder <path>` (or in Recall Bar's Settings; they share the
 setting). Both
 `Ctrl+C` and `rec stop` finalize the file cleanly and return immediately; the
 audio clean-up then continues as a detached background job, so you can
 `rec start` the next recording right away. `rec status` shows what's being
 processed, and output goes to `~/Library/Logs/RecBar/processing.log`. Jobs
-from the CLI and from RecBar share one queue and never run at the same time.
+from the CLI and from Recall Bar share one queue and never run at the same time.
 Use `rec start --wait` if a script needs the processed file when `rec` exits.
 
 ## Working with the tracks
@@ -303,7 +305,7 @@ rec export meeting.mov                    # meeting-share.mp4: both sides mixed,
 rec export meeting.mov --burn-subtitles   # subtitles rendered into the picture
 ```
 
-RecBar has the same as **Export for Sharing (.mp4)…**. The 3-track original
+Recall Bar has the same as **Export for Sharing (.mp4)…**. The 3-track original
 stays untouched. A recording made with nothing playing on the Mac has a silent
 track 1 — that's expected, not a bug.
 
@@ -336,11 +338,11 @@ One `SCStream` delivers screen frames, system audio, and the microphone
 into one `AVAssetWriter` with three inputs — which is why the tracks stay in
 sync without any timestamp juggling. `RecCore` holds all of that plus the
 source catalog, audio processing, and transcription, with no UI; `rec` and
-`RecBar` are thin front ends over it. See [CONTRIBUTING.md](CONTRIBUTING.md).
+the Recall Bar app (the `RecBar` target) are thin front ends over it. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Privacy
 
-RecBar doesn't phone home. Recordings and transcripts stay in
+Recall Bar doesn't phone home. Recordings and transcripts stay in
 `~/Movies/recordings/` (or wherever you point it). It only goes online in two
 cases, both started by you: **Check for Updates** in Settings (one request to
 GitHub's public API) and the WhisperKit model download the first time you

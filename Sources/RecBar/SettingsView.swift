@@ -47,18 +47,18 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if needsPrivacyNote(folder.url) {
-                    Text("macOS may ask RecBar for permission to use this folder the first time it records.")
+                    Text("macOS may ask Recall Bar for permission to use this folder the first time it records.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             } header: {
                 Text("Recordings")
             } footer: {
-                Text("Applies to new recordings, in RecBar and in the `rec` command-line tool. Existing recordings stay where they are.")
+                Text("Applies to new recordings, in Recall Bar and in the `rec` command-line tool. Existing recordings stay where they are.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
             SwiftUI.Section("Panel") {
-                Toggle("Keep the RecBar window on top of other apps", isOn: $controller.keepOnTop)
+                Toggle("Keep the Recall Bar window on top of other apps", isOn: $controller.keepOnTop)
                 Text("Off: the window hides when you click another app. Bring it back from the Dock or with ⌃⌥R.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -84,7 +84,7 @@ struct SettingsView: View {
         panel.allowsMultipleSelection = false
         panel.directoryURL = folder.url
         panel.prompt = "Use This Folder"
-        panel.message = "Choose where RecBar saves new recordings"
+        panel.message = "Choose where Recall Bar saves new recordings"
         NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK, let url = panel.url else { return }
         apply(url)
@@ -156,7 +156,7 @@ private struct UpdatesSection: View {
         } header: {
             Text("Updates")
         } footer: {
-            Text("RecBar only contacts GitHub when you click Check for Updates.")
+            Text("Recall Bar only contacts GitHub when you click Check for Updates.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -180,7 +180,7 @@ private struct UpdatesSection: View {
                 .font(.caption).foregroundStyle(.secondary)
         case .updating:
             ProgressView().controlSize(.small)
-            Text("Updating… RecBar restarts when it's done (about a minute).")
+            Text("Updating… Recall Bar restarts when it's done (about a minute).")
                 .font(.caption).foregroundStyle(.secondary)
         case .failed(let message):
             VStack(alignment: .leading, spacing: 2) {
@@ -202,14 +202,14 @@ private struct UpdatesSection: View {
                     Button("Update Now") { updater.updateNow() }
                         .buttonStyle(.borderedProminent)
                         .disabled(updater.blockedReason != nil || updater.isBusy)
-                    Text(updater.blockedReason ?? "Downloads the new version, rebuilds it and restarts RecBar.")
+                    Text(updater.blockedReason ?? "Downloads the new version, rebuilds it and restarts Recall Bar.")
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
         } else {
             VStack(alignment: .leading, spacing: 4) {
-                Text("You built RecBar from your own copy of the source. To update it, run:")
+                Text("You built Recall Bar from your own copy of the source. To update it, run:")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Text(updater.manualUpdateCommand)
@@ -237,7 +237,7 @@ final class SettingsWindow {
         if window == nil {
             let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable],
                                   backing: .buffered, defer: false)
-            window.title = "RecBar Settings"
+            window.title = "Recall Bar Settings"
             window.isReleasedWhenClosed = false
             self.window = window
         }

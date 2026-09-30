@@ -35,7 +35,7 @@ func usage() -> Never {
         --meter                Print mic / system audio levels every second
                                (the once-a-minute status line always shows them).
       rec folder               Show where new recordings are saved.
-      rec folder <path>        Save new recordings there (shared with RecBar's
+      rec folder <path>        Save new recordings there (shared with Recall Bar's
                                Settings). `rec folder --reset` for the default.
       rec windows              List windows you can pass to --window.
       rec mics                 List microphones you can pass to --mic.

@@ -45,7 +45,7 @@ final class Updater: ObservableObject {
 
     func check() async {
         guard let commit = build.commit else {
-            phase = .failed("This copy of RecBar has no version stamp, so it can't be compared with GitHub. Reinstall it with the one-command installer.")
+            phase = .failed("This copy of Recall Bar has no version stamp, so it can't be compared with GitHub. Reinstall it with the one-command installer.")
             return
         }
         phase = .checking
@@ -68,7 +68,7 @@ final class Updater: ObservableObject {
         let source = UpdateCheck.installerSourceDirectory.path
         let script = UpdateCheck.installerSourceDirectory.appendingPathComponent("install.sh")
         guard FileManager.default.fileExists(atPath: script.path) else {
-            phase = .failed("The installer isn't where RecBar expects it. Run the one-command install line from the README again.")
+            phase = .failed("The installer isn't where Recall Bar expects it. Run the one-command install line from the README again.")
             return
         }
         // Apps launched from the Dock get a minimal PATH; the installer needs
@@ -96,7 +96,7 @@ final class Updater: ObservableObject {
             guard result == pid || (result == -1 && errno == ECHILD) else { return }
             timer.invalidate()
             Task { @MainActor in
-                self?.phase = .failed("The update didn't complete — RecBar is still on the old version. Details are in the install log.")
+                self?.phase = .failed("The update didn't complete — Recall Bar is still on the old version. Details are in the install log.")
             }
         }
     }
@@ -107,7 +107,7 @@ final class Updater: ObservableObject {
 
     /// Commands for people who built RecBar from their own checkout.
     var manualUpdateCommand: String {
-        let folder = build.sourceDirectory.map { RecPaths.displayPath($0) } ?? "<your RecBar folder>"
+        let folder = build.sourceDirectory.map { RecPaths.displayPath($0) } ?? "<your Recall Bar folder>"
         return "cd \(folder) && git pull && make install-app"
     }
 }

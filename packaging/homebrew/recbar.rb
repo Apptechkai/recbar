@@ -16,18 +16,18 @@ class Recbar < Formula
     system "swift", "build", "-c", "release", "--disable-sandbox"
     bin.install ".build/release/rec"
     system "make", "app", "SIGN=-"
-    prefix.install "RecBar.app"
+    prefix.install "Recall Bar.app"
   end
 
   def caveats
     <<~EOS
       The menu bar / Dock app was built at:
-        #{opt_prefix}/RecBar.app
+        #{opt_prefix}/Recall Bar.app
       Copy it to /Applications:
-        cp -R #{opt_prefix}/RecBar.app /Applications/
+        cp -R "#{opt_prefix}/Recall Bar.app" /Applications/
 
       On first run, grant Screen & System Audio Recording and Microphone
-      permission to RecBar (and to your terminal for `rec`) in
+      permission to Recall Bar (and to your terminal for `rec`) in
       System Settings → Privacy & Security.
     EOS
   end

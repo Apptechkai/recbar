@@ -1,5 +1,5 @@
 #!/bin/bash
-# RecBar smoke test: exercises the real capture engine and asserts on the
+# Recall Bar smoke test: exercises the real capture engine and asserts on the
 # files it produces. Run with `make smoke`. Plays a few seconds of speech
 # through your speakers. Needs Screen Recording + Microphone permission for
 # the terminal you run it from (the first run will prompt).

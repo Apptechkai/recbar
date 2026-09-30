@@ -1,5 +1,5 @@
 #!/bin/bash
-# RecBar installer — installs or updates RecBar from source. No sudo; safe to
+# Recall Bar installer — installs or updates Recall Bar from source. No sudo; safe to
 # run again (it updates). Read it before running; it's short.
 #
 #   Install / update:  curl -fsSL https://raw.githubusercontent.com/Apptechkai/recbar/main/install.sh | bash
@@ -7,8 +7,8 @@
 #
 # What it does: checks your macOS version, installs Apple's command line tools
 # if missing (one system dialog), installs ffmpeg + whisperkit-cli via Homebrew
-# if you have Homebrew, downloads RecBar's source to
-# ~/Library/Application Support/RecBar/src, builds it, installs RecBar.app to
+# if you have Homebrew, downloads the source to
+# ~/Library/Application Support/RecBar/src, builds it, installs Recall Bar.app to
 # /Applications and the `rec` command next to your Homebrew tools, and opens it.
 
 set -euo pipefail
@@ -33,7 +33,8 @@ step() {
 have_brew() { command -v brew >/dev/null 2>&1; }
 
 # Note: `pkill -a` — macOS pkill skips its own ancestors by default, and when
-# RecBar's "Update Now" runs this script, RecBar *is* an ancestor.
+# the app's "Update Now" runs this script, the app *is* an ancestor.
+# (The app's process is still named RecBar — only its display name changed.)
 
 # Refuse while RecBar is busy: never cut off a recording or an audio clean-up.
 check_idle() {
@@ -41,17 +42,17 @@ check_idle() {
     die "A recording is in progress. Stop it, then run this again."
   fi
   if pgrep -f 'rec normalize|ebur128=framelog|\.normalizing\.mov' >/dev/null 2>&1; then
-    die "RecBar is still cleaning up a recording's audio. Try again in a few minutes."
+    die "Recall Bar is still cleaning up a recording's audio. Try again in a few minutes."
   fi
 }
 
 uninstall() {
   check_idle
-  say "Removing RecBar…"
+  say "Removing Recall Bar…"
   pkill -a -x RecBar 2>/dev/null || true
-  rm -rf /Applications/RecBar.app "$SRC"
+  rm -rf "/Applications/Recall Bar.app" /Applications/RecBar.app "$SRC"
   if have_brew; then rm -f "$(brew --prefix)/bin/rec"; fi
-  say "RecBar removed. Your recordings in ~/Movies/recordings were not touched."
+  say "Recall Bar removed. Your recordings in ~/Movies/recordings were not touched."
   note "(ffmpeg and whisperkit-cli stay installed; remove them with"
   note " 'brew uninstall ffmpeg whisperkit-cli' if nothing else uses them.)"
 }
@@ -65,7 +66,7 @@ install() {
   ver=$(sw_vers -productVersion)
   IFS=. read -r major minor _ <<<"$ver"
   if [ "$major" -lt 15 ] || { [ "$major" -eq 15 ] && [ "${minor:-0}" -lt 2 ]; }; then
-    die "RecBar needs macOS 15.2 or newer (this Mac has $ver)."
+    die "Recall Bar needs macOS 15.2 or newer (this Mac has $ver)."
   fi
 
   check_idle
@@ -100,19 +101,19 @@ install() {
 
   # 4. Get or update the source.
   if [ -d "$SRC/.git" ]; then
-    say "Updating RecBar…"
+    say "Updating Recall Bar…"
     if ! git -C "$SRC" pull --quiet --ff-only >>"$LOG" 2>&1 </dev/null; then
       rm -rf "$SRC"   # history changed upstream — start clean
     fi
   fi
   if [ ! -d "$SRC/.git" ]; then
-    say "Downloading RecBar…"
+    say "Downloading Recall Bar…"
     mkdir -p "$(dirname "$SRC")"
     step git clone --quiet "$REPO" "$SRC"
   fi
 
   # 5. Build and install.
-  say "Building RecBar (a minute or two)…"
+  say "Building Recall Bar (a minute or two)…"
   step make -C "$SRC" build
   pkill -a -x RecBar 2>/dev/null || true
   step make -C "$SRC" install-app
@@ -121,11 +122,11 @@ install() {
   fi
 
   # 6. Launch and explain the one manual step.
-  open -a /Applications/RecBar.app
-  say "RecBar $(git -C "$SRC" describe --tags --always 2>/dev/null) is installed and open."
+  open -a "/Applications/Recall Bar.app"
+  say "Recall Bar $(git -C "$SRC" describe --tags --always 2>/dev/null) is installed and open."
   note "Open it any time from the Dock, Spotlight, or with ⌃⌥R."
   note "First recording: allow Screen & System Audio Recording and Microphone"
-  note "in System Settings → Privacy & Security, then quit and reopen RecBar."
+  note "in System Settings → Privacy & Security, then quit and reopen Recall Bar."
   if have_brew; then note "Command-line tool: rec (try 'rec status')."; fi
 }
 

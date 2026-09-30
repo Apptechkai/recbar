@@ -1,5 +1,9 @@
 PREFIX ?= $(HOME)/bin
-APP = RecBar.app
+APP_NAME = Recall Bar
+APP = $(APP_NAME).app
+# Earlier builds were installed as RecBar.app; installing removes that copy so
+# the same app (same bundle id) isn't in /Applications twice.
+OLD_APP = RecBar.app
 # Signing identity. A stable identity (even a self-signed "RecBar Dev" cert
 # in the login keychain) keeps the Screen Recording / Microphone grants across
 # rebuilds; ad-hoc ("-") signing loses them every build. Auto-detects the
@@ -28,27 +32,27 @@ uninstall:
 	rm -f $(PREFIX)/rec
 
 app: build
-	rm -rf $(APP)
-	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources
-	install .build/release/RecBar $(APP)/Contents/MacOS/RecBar
-	cp Sources/RecBar/Info.plist $(APP)/Contents/Info.plist
-	cp Resources/RecBar.icns $(APP)/Contents/Resources/RecBar.icns
+	rm -rf "$(APP)"
+	mkdir -p "$(APP)/Contents/MacOS" "$(APP)/Contents/Resources"
+	install .build/release/RecBar "$(APP)/Contents/MacOS/RecBar"
+	cp Sources/RecBar/Info.plist "$(APP)/Contents/Info.plist"
+	cp Resources/RecBar.icns "$(APP)/Contents/Resources/RecBar.icns"
 	@# Stamp which commit this build came from, for Settings → Check for Updates.
 	@if [ -n "$(BUILD_COMMIT)" ]; then \
-		plutil -insert RecBarCommit -string "$(BUILD_COMMIT)" $(APP)/Contents/Info.plist; \
-		plutil -insert RecBarDirty -string "$(BUILD_DIRTY)" $(APP)/Contents/Info.plist; \
+		plutil -insert RecBarCommit -string "$(BUILD_COMMIT)" "$(APP)/Contents/Info.plist"; \
+		plutil -insert RecBarDirty -string "$(BUILD_DIRTY)" "$(APP)/Contents/Info.plist"; \
 	fi
-	@plutil -insert RecBarBuildDate -string "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" $(APP)/Contents/Info.plist
-	@plutil -insert RecBarSourceDir -string "$(CURDIR)" $(APP)/Contents/Info.plist
-	codesign --force -s "$(SIGN)" $(APP)
+	@plutil -insert RecBarBuildDate -string "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(APP)/Contents/Info.plist"
+	@plutil -insert RecBarSourceDir -string "$(CURDIR)" "$(APP)/Contents/Info.plist"
+	codesign --force -s "$(SIGN)" "$(APP)"
 
 install-app: app
-	rm -rf /Applications/$(APP)
-	cp -R $(APP) /Applications/$(APP)
-	@echo "Installed /Applications/$(APP) — launch it from Spotlight (RecBar)."
+	rm -rf "/Applications/$(APP)" "/Applications/$(OLD_APP)"
+	cp -R "$(APP)" "/Applications/$(APP)"
+	@echo "Installed /Applications/$(APP) — launch it from Spotlight ($(APP_NAME))."
 
 uninstall-app:
-	rm -rf /Applications/$(APP)
+	rm -rf "/Applications/$(APP)" "/Applications/$(OLD_APP)"
 
 # --- Release ----------------------------------------------------------------
 # One-time setup for notarization (needs an Apple Developer ID):
@@ -61,14 +65,14 @@ DIST = dist
 
 release: app
 	rm -rf $(DIST) && mkdir -p $(DIST)
-	codesign --force --options runtime --timestamp -s "$(SIGN)" $(APP)
-	ditto -c -k --keepParent $(APP) $(DIST)/RecBar-$(VERSION).zip
-	xcrun notarytool submit $(DIST)/RecBar-$(VERSION).zip --keychain-profile "$(NOTARY_PROFILE)" --wait
-	xcrun stapler staple $(APP)
-	ditto -c -k --keepParent $(APP) $(DIST)/RecBar-$(VERSION).zip
+	codesign --force --options runtime --timestamp -s "$(SIGN)" "$(APP)"
+	ditto -c -k --keepParent "$(APP)" "$(DIST)/RecallBar-$(VERSION).zip"
+	xcrun notarytool submit "$(DIST)/RecallBar-$(VERSION).zip" --keychain-profile "$(NOTARY_PROFILE)" --wait
+	xcrun stapler staple "$(APP)"
+	ditto -c -k --keepParent "$(APP)" "$(DIST)/RecallBar-$(VERSION).zip"
 	install .build/release/rec $(DIST)/rec
 	@echo "Release artifacts in $(DIST)/"
 
 clean:
 	swift package clean
-	rm -rf $(APP) $(DIST)
+	rm -rf "$(APP)" $(DIST)

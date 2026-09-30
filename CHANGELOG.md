@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Renamed to **Recall Bar** (display name, app bundle, docs). The repository,
+  install line, `rec` command and app identity are unchanged, so existing
+  permissions and settings carry over.
+
 ## 1.0.0 — first public release
 
 - Headless recording of the main display, one window, or one app (all its

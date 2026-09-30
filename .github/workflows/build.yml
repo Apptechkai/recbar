@@ -14,7 +14,7 @@ jobs:
         run: swift --version
       - name: Build (release)
         run: swift build -c release
-      - name: Package RecBar.app (ad-hoc signed)
+      - name: Package Recall Bar.app (ad-hoc signed)
         run: make app SIGN=-
       - name: Smoke test CLI
         run: .build/release/rec 2>&1 | head -3 || true

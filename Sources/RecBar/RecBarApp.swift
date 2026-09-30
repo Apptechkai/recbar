@@ -17,7 +17,7 @@ struct RecBarApp: App {
     var body: some Scene {
         // .window style: a real SwiftUI popover panel, so live progress bars
         // work (plain .menu items can't re-render while open).
-        MenuBarExtra("RecBar", systemImage: icon) {
+        MenuBarExtra("Recall Bar", systemImage: icon) {
             PanelView(controller: controller, transcriber: transcriber)
         }
         .menuBarExtraStyle(.window)
@@ -68,7 +68,7 @@ struct PanelView: View {
 
     private var header: some View {
         HStack {
-            Text("RecBar").font(.title3.weight(.semibold))
+            Text("Recall Bar").font(.title3.weight(.semibold))
             Spacer()
             statusPill
         }
@@ -324,7 +324,7 @@ struct PanelView: View {
                         Text("Transcribe to subtitles").font(.callout.weight(.medium))
                         InfoButton("""
                         Writes a .srt file next to the recording using a local Whisper model — \
-                        nothing is uploaded. RecBar recordings are transcribed per track, so lines \
+                        nothing is uploaded. Recall Bar recordings are transcribed per track, so lines \
                         are labelled [Me] and [Them].
                         """)
                     }

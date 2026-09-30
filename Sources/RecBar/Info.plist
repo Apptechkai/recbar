@@ -5,7 +5,9 @@
     <key>CFBundleIdentifier</key>
     <string>sg.com.apptechsystem.recbar</string>
     <key>CFBundleName</key>
-    <string>RecBar</string>
+    <string>Recall Bar</string>
+    <key>CFBundleDisplayName</key>
+    <string>Recall Bar</string>
     <key>CFBundleExecutable</key>
     <string>RecBar</string>
     <key>CFBundlePackageType</key>
@@ -19,6 +21,6 @@
     <key>CFBundleIconFile</key>
     <string>RecBar</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>RecBar records your microphone as a separate audio track in meeting recordings.</string>
+    <string>Recall Bar records your microphone as a separate audio track in meeting recordings.</string>
 </dict>
 </plist>

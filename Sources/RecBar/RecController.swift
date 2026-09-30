@@ -94,7 +94,7 @@ final class RecController: ObservableObject {
         if !CGPreflightScreenCaptureAccess() {
             if requestPermission { CGRequestScreenCaptureAccess() }
             windows = []
-            windowsHint = "Grant Screen & System Audio Recording to RecBar in System Settings → Privacy & Security, then relaunch RecBar."
+            windowsHint = "Grant Screen & System Audio Recording to Recall Bar in System Settings → Privacy & Security, then relaunch Recall Bar."
             return
         }
         do {
@@ -277,7 +277,7 @@ final class RecController: ObservableObject {
             alert("Screen & System Audio Recording permission is needed.",
                   detail: """
                   System Settings → Privacy & Security → Screen & System Audio Recording \
-                  → enable RecBar, then relaunch RecBar and try again.
+                  → enable Recall Bar, then relaunch Recall Bar and try again.
                   """)
             return false
         }
@@ -289,12 +289,12 @@ final class RecController: ObservableObject {
             let granted = await AVCaptureDevice.requestAccess(for: .audio)
             if !granted {
                 alert("Microphone permission was denied.",
-                      detail: "System Settings → Privacy & Security → Microphone → enable RecBar.")
+                      detail: "System Settings → Privacy & Security → Microphone → enable Recall Bar.")
             }
             return granted
         default:
             alert("Microphone permission is needed.",
-                  detail: "System Settings → Privacy & Security → Microphone → enable RecBar.")
+                  detail: "System Settings → Privacy & Security → Microphone → enable Recall Bar.")
             return false
         }
     }

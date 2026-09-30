@@ -17,7 +17,7 @@ final class PanelWindow {
             let window = NSWindow(
                 contentRect: NSRect(origin: .zero, size: hosting.fittingSize),
                 styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            window.title = "RecBar"
+            window.title = "Recall Bar"
             window.contentView = hosting
             window.isReleasedWhenClosed = false
             window.center()

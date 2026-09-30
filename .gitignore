@@ -1,6 +1,7 @@
 .build/
 .swiftpm/
 RecBar.app/
+Recall Bar.app/
 dist/
 *.mov
 .DS_Store
