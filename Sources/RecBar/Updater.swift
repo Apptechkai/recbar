@@ -89,7 +89,11 @@ final class Updater: ObservableObject {
         // one, so if the installer finishes and we're still running, it failed.
         watchTimer?.invalidate()
         watchTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] timer in
-            guard kill(pid, 0) != 0 else { return }
+            // The installer is our child: once it exits it lingers as a zombie
+            // (so kill(pid, 0) keeps succeeding) until we reap it with waitpid.
+            var status: Int32 = 0
+            let result = waitpid(pid, &status, WNOHANG)
+            guard result == pid || (result == -1 && errno == ECHILD) else { return }
             timer.invalidate()
             Task { @MainActor in
                 self?.phase = .failed("The update didn't complete — RecBar is still on the old version. Details are in the install log.")

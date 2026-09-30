@@ -195,13 +195,17 @@ private struct UpdatesSection: View {
 
     @ViewBuilder private var updateAction: some View {
         if updater.build.isInstallerManaged {
-            HStack(spacing: 10) {
-                Button("Update Now") { updater.updateNow() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(updater.blockedReason != nil)
-                Text(updater.blockedReason ?? "Downloads the new version, rebuilds it and restarts RecBar.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            // Re-evaluated every 2 s: a recording or clean-up started or
+            // finished elsewhere (e.g. the CLI) should enable/disable this.
+            TimelineView(.periodic(from: .now, by: 2)) { _ in
+                HStack(spacing: 10) {
+                    Button("Update Now") { updater.updateNow() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(updater.blockedReason != nil || updater.isBusy)
+                    Text(updater.blockedReason ?? "Downloads the new version, rebuilds it and restarts RecBar.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         } else {
             VStack(alignment: .leading, spacing: 4) {
