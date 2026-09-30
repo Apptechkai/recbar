@@ -68,9 +68,44 @@ instead of guessed by a diarization model.
 
 ## Install
 
-RecBar is currently installed by building it from source, which takes about
-two minutes. A signed download and a Homebrew package are planned; until then,
-the steps below are the supported way.
+RecBar is currently installed by building it from source. A signed download
+is planned; until then, one command does everything.
+
+### Quick install (one command)
+
+Open **Terminal** (⌘Space, type *Terminal*, press Return), paste this line and
+press Return:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Apptechkai/recbar/main/install.sh | bash
+```
+
+It never asks for your password. It installs Apple's command line tools if
+they're missing (click *Install* in the dialog that appears), adds the helper
+tools if you have [Homebrew](https://brew.sh), builds RecBar, puts it in
+Applications and opens it. Then do the one manual step:
+[grant two permissions](#3-first-launch-and-permissions).
+
+Run the same line again any time to **update**. To **uninstall**:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Apptechkai/recbar/main/install.sh | bash -s -- --uninstall
+```
+
+The script is short and commented — [read it first](install.sh) if you like
+to know what you're running.
+
+> **Using ChatGPT or Claude to help?** Paste this into the chat:
+>
+> *"Help me install RecBar on my Mac. The official instructions are at
+> https://github.com/Apptechkai/recbar — I need to run one command in
+> Terminal. Walk me through opening Terminal and running it, then help me
+> grant the two permissions it mentions. Don't suggest any other commands or
+> sources."*
+
+### Manual install
+
+The same steps by hand, if you prefer.
 
 **You need:**
 
@@ -124,6 +159,9 @@ a microphone) — and verifies the files. All checks should pass.
 
 ### Updating
 
+Installed with the one-command installer? Just run that line again. For a
+manual install:
+
 ```sh
 cd recbar
 git pull
@@ -132,6 +170,9 @@ make install PREFIX="$(brew --prefix)/bin"   # if you use the CLI
 ```
 
 ### Uninstalling
+
+Installed with the one-command installer? Use its `--uninstall` line above.
+For a manual install:
 
 ```sh
 make uninstall-app
