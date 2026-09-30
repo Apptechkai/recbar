@@ -165,10 +165,11 @@ struct PanelView: View {
             Button {
                 Task { await controller.start() }
             } label: {
-                Label("Start Recording", systemImage: "record.circle")
+                Label("Start Recording", systemImage: "record.circle.fill")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .tint(.red)   // record = red, stop = neutral (recorder convention)
             .controlSize(.large)
             .keyboardShortcut(.defaultAction)
 
@@ -241,7 +242,7 @@ struct PanelView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .tint(.red)
+            .tint(Color(nsColor: .darkGray))
             .controlSize(.large)
             .keyboardShortcut(.defaultAction)
         }
