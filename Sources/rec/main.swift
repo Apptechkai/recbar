@@ -40,16 +40,26 @@ func usage() -> Never {
       rec windows              List windows you can pass to --window.
       rec mics                 List microphones you can pass to --mic.
       rec normalize <file>     Run the audio clean-up + normalization on an
-                               existing recording, in place.
+                               existing recording, in place (and embed its
+                               markers as chapters). --chapters-only: just that.
       rec transcribe <file>    Write <file>.srt next to the file using a local
                                WhisperKit model (downloaded on first use).
         --translate            Translate speech to English instead of
                                transcribing it as spoken.
+        --no-speakers          Don't tell the meeting's speakers apart (by
+                               default they're labelled Speaker 1, 2, …).
+      rec speakers <file>      List the speakers in a transcript, with a line
+                               each said. Rename them (the .srt is rewritten):
+                               rec speakers <file> "Speaker 1=Alice" "Me=Kai"
+                               ("Alice=" resets a name).
       rec export <file>        Write <file>-share.mp4: one mixed stereo audio
                                track, so any player/upload hears both sides.
                                A matching .srt is attached as subtitles.
         --burn-subtitles       Render the .srt into the picture instead
                                (re-encodes video).
+      rec mark [label]         Drop a "this matters" marker in the running
+                               recording (Recall Bar: ⌃⌥M). Markers become
+                               video chapters and ★ lines in transcripts.
       rec stop                 Cleanly stop a recording started elsewhere.
       rec status               Show whether a recording is running.
     """)
@@ -182,7 +192,7 @@ final class LevelStore: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         func fmt(_ t: AudioLevelTrack) -> String {
             guard let l = levels[t] else { return "—" }
-            return l <= -59 ? "silent" : String(format: "%.0f dB", l)
+            return l <= -85 ? "silent" : String(format: "%.0f dB", l)
         }
         return "mic \(fmt(.microphone)), audio \(fmt(.system))"
     }
@@ -231,6 +241,9 @@ func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?,
         recorder = try await Recorder(outputURL: outputURL, audioOnly: audioOnly,
                                       source: source, microphone: microphone,
                                       echoCancellation: echoCancel)
+        if recorder.echoCancellationActive {
+            print("  starting the microphone…")   // voice processing warms up (~2–3 s)
+        }
         try await recorder.start()
     } catch {
         fail("Could not start capture: \(error)")
@@ -271,6 +284,15 @@ func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?,
     sigint.resume()
     sigterm.resume()
 
+    // `rec mark [label]` from another terminal drops a request file.
+    let markerWatcher = MarkerFile.Watcher(recorder: recorder) { marker in
+        if let marker {
+            print("  ★ \(marker.title) at \(marker.timeText)")
+        } else {
+            print("  ★ marker ignored — the recording hasn't started writing yet")
+        }
+    }
+
     // Once a minute, one status line — enough to see it's alive from the
     // terminal without any on-screen UI.
     let heartbeat = DispatchSource.makeTimerSource(queue: signalQueue)
@@ -282,6 +304,7 @@ func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?,
     heartbeat.resume()
 
     let reason = await stopSignal.wait()
+    markerWatcher.stop()
     heartbeat.cancel()
     print("\nStopping (\(reason)) — finalizing file…")
 
@@ -296,12 +319,20 @@ func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?,
     PidFile.remove()
     print("✔ Saved \(outputURL.path)  (\(formatDuration(recorder.elapsed)), \(fileSizeString(outputURL)))")
 
-    guard normalize else { exit(0) }
+    let markerCount = recorder.markers.count
+    if markerCount > 0 {
+        print("  ★ \(markerCount) marker\(markerCount == 1 ? "" : "s") — they become chapters in the video")
+    }
+    guard normalize || markerCount > 0 else { exit(0) }
+    let jobArguments = normalize ? ["normalize", outputURL.path]
+                                 : ["normalize", "--chapters-only", outputURL.path]
 
     if !waitForProcessing,
        spawnDetached(executable: Bundle.main.executablePath ?? CommandLine.arguments[0],
-                     arguments: ["normalize", outputURL.path], log: processingLogURL) != nil {
-        print("  Audio clean-up is running in the background — you can start the next recording now.")
+                     arguments: jobArguments, log: processingLogURL) != nil {
+        print(normalize
+              ? "  Audio clean-up is running in the background — you can start the next recording now."
+              : "  Adding chapters in the background — you can start the next recording now.")
         print("  Progress: `rec status`   Log: \(processingLogURL.path)")
         exit(0)
     }
@@ -310,7 +341,7 @@ func commandStart(outputPath: String?, audioOnly: Bool, windowQuery: String?,
     print("  cleaning up + normalizing audio…")
     let lastShown = LockedValue(-1)
     do {
-        try await AudioNormalizer.normalize(fileURL: outputURL) { fraction in
+        try await AudioNormalizer.normalize(fileURL: outputURL, cleanUpAudio: normalize) { fraction in
             let percent = Int(fraction * 100) / 10 * 10
             if lastShown.exchange(percent) != percent { print("  … \(percent)%") }
         }
@@ -332,6 +363,64 @@ final class LockedValue: @unchecked Sendable {
     }
 }
 
+func commandSpeakers(path: String, renames: [String]) {
+    let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+    guard let json = Transcript.locate(for: url) else {
+        fail("No transcript found for \(url.lastPathComponent). Transcribe it first: rec transcribe \"\(url.path)\"")
+    }
+    var transcript: Transcript
+    do { transcript = try Transcript.load(from: json) } catch { fail("Couldn't read \(json.lastPathComponent): \(error)") }
+    guard !transcript.speakers.isEmpty else {
+        fail("This transcript has no speaker labels (only one voice was found).")
+    }
+
+    if !renames.isEmpty {
+        for rename in renames {
+            // "Name=" (nothing after =) resets to the default name.
+            let parts = rename.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).map {
+                $0.trimmingCharacters(in: .whitespaces)
+            }
+            guard parts.count == 2,
+                  let speaker = transcript.speakers.first(where: {
+                      $0.name.caseInsensitiveCompare(parts[0]) == .orderedSame
+                          || $0.defaultName.caseInsensitiveCompare(parts[0]) == .orderedSame
+                          || $0.id == parts[0]
+                  })
+            else { fail("Use \"Current name=New name\" with a speaker from this list (got \"\(rename)\").") }
+            transcript.rename(speaker.id, to: parts[1])
+        }
+        do { try transcript.save(to: json) } catch { fail("Couldn't save: \(error)") }
+        print("✔ Updated \(transcript.subtitleFile)")
+    }
+
+    for summary in transcript.summaries() {
+        let s = summary.speaker
+        let renamed = s.name != s.defaultName ? "  (was \(s.defaultName))" : ""
+        print("\(s.name)\(renamed) — \(summary.lineCount) lines, \(Marker.clock(summary.talkTime)) talking")
+        for line in summary.firstLines {
+            print("    \(Marker.clock(line.start))  \"\(line.text.prefix(90))\"")
+        }
+    }
+    if renames.isEmpty {
+        print("\nRename: rec speakers \"\(url.path)\" \"Speaker 1=Alice\"")
+    }
+}
+
+func commandMark(label: String?) {
+    guard let pid = PidFile.runningPID() else {
+        fail("No recording is running.")
+    }
+    _ = pid
+    MarkerFile.writeRequest(label: label)
+    // The recording picks requests up every ¼ s.
+    for _ in 0..<20 where MarkerFile.requestPending { usleep(100_000) }
+    if MarkerFile.requestPending {
+        try? FileManager.default.removeItem(atPath: MarkerFile.requestPath)
+        fail("The recording didn't pick up the marker — is it still running?")
+    }
+    print("★ Marker added\(label.map { " — \($0)" } ?? "").")
+}
+
 func commandStop() {
     guard let pid = PidFile.runningPID() else {
         fail("No recording is running.")
@@ -350,7 +439,7 @@ func commandStop() {
     fail("Recorder (pid \(pid)) is still running — check its terminal for errors.")
 }
 
-func commandNormalize(path: String) async {
+func commandNormalize(path: String, chaptersOnly: Bool = false) async {
     let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
     guard FileManager.default.fileExists(atPath: url.path) else {
         fail("No such file: \(url.path)")
@@ -364,7 +453,7 @@ func commandNormalize(path: String) async {
     // Ctrl+C / kill stops ffmpeg cleanly; the original file stays intact.
     let job = Task {
         let lastShown = LockedValue(-1)
-        try await AudioNormalizer.normalize(fileURL: url) { fraction in
+        try await AudioNormalizer.normalize(fileURL: url, cleanUpAudio: !chaptersOnly) { fraction in
             let percent = Int(fraction * 100) / 10 * 10
             if lastShown.exchange(percent) != percent { print("  … \(percent)%") }
         }
@@ -388,12 +477,12 @@ func commandNormalize(path: String) async {
     print("✔ Done  \(url.lastPathComponent)  (\(fileSizeString(url)))")
 }
 
-func commandTranscribe(path: String, translate: Bool) async {
+func commandTranscribe(path: String, translate: Bool, speakers: Bool = true) async {
     let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
     guard FileManager.default.fileExists(atPath: url.path) else {
         fail("No such file: \(url.path)")
     }
-    let job = TranscriptionJob(input: url, translateToEnglish: translate)
+    let job = TranscriptionJob(input: url, translateToEnglish: translate, identifySpeakers: speakers)
     let lastShown = LockedValue(-1)
     job.onStatus = { text in print("  \(text)") }
     job.onProgress = { value in
@@ -408,6 +497,10 @@ func commandTranscribe(path: String, translate: Bool) async {
     do {
         let srt = try await job.run()
         print("✔ Wrote \(srt.path)")
+        if let json = Transcript.locate(for: srt), let transcript = try? Transcript.load(from: json),
+           transcript.speakers.contains(where: { $0.id.hasPrefix("s") }) {
+            print("  Speakers found — name them with: rec speakers \"\(srt.path)\"")
+        }
     } catch is CancellationError {
         fail("Cancelled.")
     } catch {
@@ -507,14 +600,25 @@ case "windows":
 case "mics":
     commandMics()
 case "normalize":
-    guard arguments.count == 2 else { usage() }
-    await commandNormalize(path: arguments[1])
+    var rest = Array(arguments.dropFirst())
+    let chaptersOnly = rest.contains("--chapters-only")
+    rest.removeAll { $0 == "--chapters-only" }
+    guard rest.count == 1 else { usage() }
+    await commandNormalize(path: rest[0], chaptersOnly: chaptersOnly)
+case "mark":
+    guard arguments.count <= 2 else { usage() }
+    commandMark(label: arguments.count == 2 ? arguments[1] : nil)
+case "speakers":
+    guard arguments.count >= 2 else { usage() }
+    commandSpeakers(path: arguments[1], renames: Array(arguments.dropFirst(2)))
 case "transcribe":
     var rest = Array(arguments.dropFirst())
     let translate = rest.contains("--translate")
     rest.removeAll { $0 == "--translate" }
+    let speakers = !rest.contains("--no-speakers")
+    rest.removeAll { $0 == "--no-speakers" }
     guard rest.count == 1 else { usage() }
-    await commandTranscribe(path: rest[0], translate: translate)
+    await commandTranscribe(path: rest[0], translate: translate, speakers: speakers)
 case "export":
     var rest = Array(arguments.dropFirst())
     let burn = rest.contains("--burn-subtitles")

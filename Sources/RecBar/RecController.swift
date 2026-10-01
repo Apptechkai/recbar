@@ -13,6 +13,9 @@ final class RecController: ObservableObject {
     static let shared = RecController()
 
     @Published private(set) var isRecording = false
+    /// Between Start and the first written frame (the echo-cancelled mic
+    /// needs ~2–3 s to warm up).
+    @Published private(set) var isStarting = false
     @Published private(set) var elapsedText = "00:00:00"
     @Published var audioOnly = false
     @Published var normalizeAudio = true
@@ -50,11 +53,14 @@ final class RecController: ObservableObject {
 
     /// Live audio levels in dBFS while recording, plus how long the mic has
     /// been silent (to flag a muted / wrong microphone).
-    @Published private(set) var micLevel: Float = -60
-    @Published private(set) var systemLevel: Float = -60
+    @Published private(set) var micLevel: Float = -120
+    @Published private(set) var systemLevel: Float = -120
     @Published private(set) var micSilentSeconds: Int = 0
     private var micLastSignal = Date()
     @Published private(set) var activeMicName = ""
+    /// ★ markers dropped in the current recording.
+    @Published private(set) var markers: [Marker] = []
+    private var badgeResetWork: DispatchWorkItem?
 
     /// Panel window stays above other apps (else it hides when you click away).
     @Published var keepOnTop: Bool = UserDefaults.standard.bool(forKey: "keepOnTop") {
@@ -68,6 +74,7 @@ final class RecController: ObservableObject {
     private var recorder: Recorder?
     private var timer: Timer?
     private var sigintSource: DispatchSourceSignal?
+    private var markerWatcher: MarkerFile.Watcher?
 
     init() {
         // `rec stop` sends SIGINT: stop the recording, but keep the app alive.
@@ -78,6 +85,32 @@ final class RecController: ObservableObject {
         }
         source.resume()
         sigintSource = source
+
+    }
+
+    /// Drops a ★ marker (⌃⌥M, the panel button, or `rec mark`). Feedback is
+    /// the Dock badge and the panel — nothing on screen, nothing audible.
+    func addMarker(label: String? = nil) {
+        guard isRecording, let marker = recorder?.addMarker(label: label) else {
+            NSSound.beep()   // not recording (only reachable via hotkey)
+            return
+        }
+        noteMarker(marker)
+    }
+
+    private func noteMarker(_ marker: Marker) {
+        markers.append(marker)
+        NSApp.dockTile.badgeLabel = "★ \(marker.index)"
+        badgeResetWork?.cancel()
+        let reset = DispatchWorkItem { [weak self] in self?.updateRecordingBadge() }
+        badgeResetWork = reset
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: reset)
+    }
+
+    private func updateRecordingBadge() {
+        guard isRecording, let recorder else { return }
+        let minutes = Int(recorder.elapsed) / 60
+        NSApp.dockTile.badgeLabel = minutes > 0 ? "REC \(minutes)m" : "REC"
     }
 
     /// Why the window list is empty, if it is (shown under the picker).
@@ -109,10 +142,14 @@ final class RecController: ObservableObject {
         }
     }
 
-    func start() async {
+    /// `sourceOverride`: capture this instead of the panel's Source (used by
+    /// meeting detection's "only the meeting app" option).
+    func start(sourceOverride: CaptureSource? = nil) async {
         // Clean-up of earlier recordings may still be running — that's fine,
         // it's a separate background queue.
-        guard !isRecording else { return }
+        guard !isRecording, !isStarting else { return }
+        isStarting = true
+        defer { isStarting = false }
         if let pid = PidFile.runningPID(),
            pid != ProcessInfo.processInfo.processIdentifier {
             alert("Another recording is already running (pid \(pid)).",
@@ -122,7 +159,9 @@ final class RecController: ObservableObject {
         guard await ensurePermissions() else { return }
 
         var source: CaptureSource = .display
-        if let pickedSource {
+        if let sourceOverride {
+            source = sourceOverride
+        } else if let pickedSource {
             source = pickedSource
         } else if selectedWindowID != 0 {
             guard let window = windows.first(where: { $0.id == selectedWindowID }) else {
@@ -155,17 +194,18 @@ final class RecController: ObservableObject {
                         self.systemLevel = level
                     case .microphone:
                         self.micLevel = level
-                        // Real mics idle around −45…−55 dB (room tone); only
-                        // digital silence (muted / missing device) is lower.
-                        if level > -58 { self.micLastSignal = Date() }
+                        // Room tone is −45…−55 dB raw and ~−60 dB after the
+                        // echo canceller's noise suppression; a muted or
+                        // missing mic is digital silence (−90 dB and below).
+                        if level > -85 { self.micLastSignal = Date() }
                         self.micSilentSeconds = Int(Date().timeIntervalSince(self.micLastSignal))
                     }
                 }
             }
             activeMicName = microphone?.name ?? (microphones.first?.name ?? "system default")
             micLastSignal = Date()
-            micLevel = -60
-            systemLevel = -60
+            micLevel = -120
+            systemLevel = -120
             micSilentSeconds = 0
             newRecorder.onStreamStopped = { [weak self] error in
                 Task { @MainActor in
@@ -174,6 +214,11 @@ final class RecController: ObservableObject {
             }
             try await newRecorder.start()
             recorder = newRecorder
+            // `rec mark` from a terminal while Recall Bar records.
+            markerWatcher = MarkerFile.Watcher(recorder: newRecorder) { [weak self] marker in
+                guard let marker else { return }
+                Task { @MainActor in self?.noteMarker(marker) }
+            }
         } catch {
             alert("Could not start recording.", detail: "\(error)")
             return
@@ -183,12 +228,14 @@ final class RecController: ObservableObject {
         isRecording = true
         elapsedText = "00:00:00"
         NSApp.dockTile.badgeLabel = "REC"  // visible in the Dock even with the panel closed
+        markers = []
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, let recorder = self.recorder else { return }
                 self.elapsedText = formatDuration(recorder.elapsed)
-                let minutes = Int(recorder.elapsed) / 60
-                NSApp.dockTile.badgeLabel = minutes > 0 ? "REC \(minutes)m" : "REC"
+                // Keep "REC n m" current, except during the brief "★ n" flash
+                // after a marker (that resets itself).
+                if !(NSApp.dockTile.badgeLabel ?? "").hasPrefix("★") { self.updateRecordingBadge() }
             }
         }
     }
@@ -198,6 +245,8 @@ final class RecController: ObservableObject {
     func stop(streamError: String? = nil, enqueueProcessing: Bool = true) async {
         guard let recorder else { return }
         self.recorder = nil
+        markerWatcher?.stop()
+        markerWatcher = nil
         timer?.invalidate()
         timer = nil
 
@@ -214,8 +263,9 @@ final class RecController: ObservableObject {
         NSApp.dockTile.badgeLabel = nil
         if finalizeError == nil {
             lastRecordingURL = recorder.outputURL
-            if normalizeAudio, enqueueProcessing {
-                PostProcessor.shared.enqueue(recorder.outputURL)
+            // Clean-up and/or turning ★ markers into chapters, in the background.
+            if enqueueProcessing, normalizeAudio || !markers.isEmpty {
+                PostProcessor.shared.enqueue(recorder.outputURL, cleanUpAudio: normalizeAudio)
             }
         }
 

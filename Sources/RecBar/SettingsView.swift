@@ -7,6 +7,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var controller = RecController.shared
     @ObservedObject var updater = Updater.shared
+    @ObservedObject var detector = MeetingDetector.shared
     @State private var folder = RecPaths.resolveRecordingsDirectory()
     @State private var isCustom = RecSettings.customRecordingsFolder != nil
     @State private var error: String?
@@ -63,12 +64,45 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
+            SwiftUI.Section {
+                Toggle("Ask to record when a meeting starts", isOn: $detector.askToRecord)
+                Toggle("Offer to stop when the call ends", isOn: $detector.offerToStop)
+                Picker("Record", selection: $detector.captureChoice) {
+                    ForEach(MeetingDetector.CaptureChoice.allCases) { Text($0.title).tag($0) }
+                }
+                Text(detector.captureChoice == .panel
+                     ? "Records whatever the panel's Source is set to (Entire display by default) — best when you present."
+                     : "Records only the meeting app's windows and sound — other apps' audio stays out.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if detector.notificationsAllowed == false {
+                    HStack(alignment: .top) {
+                        Label("Notifications are off for Recall Bar, so it can only ask in its own window.",
+                              systemImage: "bell.slash")
+                            .font(.caption).foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        Button("Open Notification Settings") {
+                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!)
+                        }
+                        .controlSize(.small)
+                    }
+                }
+            } header: {
+                Text("Meeting detection")
+            } footer: {
+                Text("Recall Bar notices when Zoom, Teams, Slack, Webex, FaceTime, Discord or a browser (Google Meet, Teams or Zoom on the web) starts using your microphone. It only checks which app holds the mic and never records until you click Record.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             UpdatesSection(updater: updater)
         }
         .formStyle(.grouped)
         .frame(width: 500)
         .fixedSize(horizontal: false, vertical: true)
-        .onAppear(perform: reload)
+        .onAppear {
+            reload()
+            detector.refreshNotificationStatus()
+        }
     }
 
     private func reload() {

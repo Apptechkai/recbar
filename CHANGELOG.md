@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **★ Markers**: ⌃⌥M (global), *Add Marker* in the panel, or `rec mark
+  [label]`. Saved to `<name>.markers.json` as you go, embedded as video
+  chapters after Stop (also when audio clean-up is off), carried into shared
+  exports, and highlighted with ★ in transcripts.
+- **Speaker separation**: transcripts label the meeting track's voices
+  Speaker 1, 2, … (open SpeakerKit models, CC BY 4.0, 11 MB). Names are kept
+  in `<name>.transcript.json`; *Name Speakers…* (with ▶ voice samples) and
+  `rec speakers` rename them and rewrite the `.srt`. `--no-speakers` to skip.
+- **Meeting detection**: notices Zoom, Teams, Slack, Webex, FaceTime, Discord
+  and browser meetings taking the microphone, asks to record (notification +
+  panel banner), and offers to stop when the call ends. Settings to turn it
+  off or record only the meeting app.
+- Fix: with echo cancellation, the first ~3 s of the microphone were silent
+  (voice processing fades in). Recording now starts once the mic is live
+  ("Starting…" for about 2 s).
+- Fix: the mic meter and "No mic signal" warning treated echo-cancelled room
+  tone (~−60 dB) as silence; only true digital silence now counts.
+- `make smoke`: markers, speakers, mic start-up checks; the echo check aligns
+  tracks on the movie timeline and is skipped when output is muted.
 - Renamed to **Recall Bar** (display name, app bundle, docs). The repository,
   install line, `rec` command and app identity are unchanged, so existing
   permissions and settings carry over.

@@ -1,4 +1,5 @@
 import AppKit
+import RecCore
 import Carbon.HIToolbox
 import SwiftUI
 
@@ -38,7 +39,8 @@ final class PanelWindow {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        HotKey.register()  // ⌃⌥R → show panel
+        HotKey.register()  // ⌃⌥R → show panel, ⌃⌥M → ★ marker
+        Task { @MainActor in MeetingDetector.shared.start() }
         Task { @MainActor in
             PanelWindow.shared.show()  // Dock launch → panel
             // `open -a RecBar --args --show-settings` opens Settings directly;
@@ -47,6 +49,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let args = CommandLine.arguments
             if args.contains("--show-settings") || args.contains("--check-updates") {
                 SettingsWindow.shared.show()
+            }
+            // `--name-speakers <recording|.srt>` opens Name Speakers for it.
+            if let i = args.firstIndex(of: "--name-speakers"), i + 1 < args.count,
+               let json = Transcript.locate(for: URL(fileURLWithPath: args[i + 1])) {
+                SpeakersWindow.shared.show(transcriptURL: json)
             }
             if args.contains("--check-updates") || args.contains("--update-now") {
                 await Updater.shared.check()
@@ -80,21 +87,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// Global hotkey via Carbon — works without Accessibility permission, unlike
+/// Global hotkeys via Carbon — work without Accessibility permission, unlike
 /// NSEvent global monitors.
+///   ⌃⌥R  show the panel
+///   ⌃⌥M  drop a ★ marker in the current recording
 enum HotKey {
-    private static var hotKeyRef: EventHotKeyRef?
+    private static var refs: [EventHotKeyRef?] = []
+    private static let signature: OSType = 0x5242_4152 // 'RBAR'
 
     static func register() {
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
                                       eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
-            Task { @MainActor in PanelWindow.shared.show() }
+        InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
+            var hotKeyID = EventHotKeyID()
+            GetEventParameter(event, EventParamName(kEventParamDirectObject),
+                              EventParamType(typeEventHotKeyID), nil,
+                              MemoryLayout<EventHotKeyID>.size, nil, &hotKeyID)
+            let id = hotKeyID.id
+            Task { @MainActor in
+                switch id {
+                case 2: RecController.shared.addMarker()
+                default: PanelWindow.shared.show()
+                }
+            }
             return noErr
         }, 1, &eventType, nil, nil)
 
-        let hotKeyID = EventHotKeyID(signature: 0x5242_4152 /* 'RBAR' */, id: 1)
-        RegisterEventHotKey(UInt32(kVK_ANSI_R), UInt32(controlKey | optionKey),
-                            hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef)
+        for (id, key) in [(UInt32(1), kVK_ANSI_R), (UInt32(2), kVK_ANSI_M)] {
+            var ref: EventHotKeyRef?
+            RegisterEventHotKey(UInt32(key), UInt32(controlKey | optionKey),
+                                EventHotKeyID(signature: signature, id: id),
+                                GetApplicationEventTarget(), 0, &ref)
+            refs.append(ref)
+        }
     }
 }

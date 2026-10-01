@@ -35,6 +35,13 @@ public struct CaptureApplication: Identifiable, Hashable, Sendable {
     public let name: String
     public let bundleID: String
     public let windowCount: Int
+
+    public init(id: pid_t, name: String, bundleID: String, windowCount: Int) {
+        self.id = id
+        self.name = name
+        self.bundleID = bundleID
+        self.windowCount = windowCount
+    }
 }
 
 /// A physical display.
@@ -155,6 +162,43 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
     private var sessionStarted = false
     private var finished = false
     private var startDate: Date?
+    /// Host-clock time of the file's t = 0 (first written sample); markers
+    /// are measured from here so they line up with the video.
+    private var sessionStartTime: CMTime?
+    private var markerList: [Marker] = []
+
+    /// Markers dropped so far, oldest first.
+    public var markers: [Marker] { queue.sync { markerList } }
+
+    /// Drops a marker at "now" on the recording's timeline and saves the
+    /// sidecar file. Nil if nothing has been written yet (first second) or
+    /// the recording has ended.
+    /// `requestedAt`: when the marker was asked for, if earlier than now
+    /// (e.g. `rec mark`, picked up a moment later).
+    @discardableResult
+    public func addMarker(label: String? = nil, requestedAt: Date? = nil) -> Marker? {
+        let marker: Marker? = queue.sync {
+            guard sessionStarted, !finished, let start = sessionStartTime else { return nil }
+            var now = CMClockGetTime(CMClockGetHostTimeClock())
+            if let requestedAt {
+                let lag = min(max(Date().timeIntervalSince(requestedAt), 0), 5)
+                now = CMTimeSubtract(now, CMTime(seconds: lag, preferredTimescale: 1_000_000))
+            }
+            let marker = Marker(index: markerList.count + 1,
+                                time: max(0, CMTimeSubtract(now, start).seconds),
+                                label: label)
+            markerList.append(marker)
+            return marker
+        }
+        // Disk I/O stays off the real-time capture queue.
+        if marker != nil {
+            let snapshot = queue.sync { markerList }
+            let url = outputURL
+            markerSaveQueue.async { MarkerFile.save(snapshot, for: url) }
+        }
+        return marker
+    }
+    private let markerSaveQueue = DispatchQueue(label: "rec.marker-save", qos: .utility)
 
     /// Called (once) if the stream dies on its own, e.g. the display sleeps
     /// or permission is revoked mid-recording.
@@ -320,7 +364,10 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
         guard writer.startWriting() else {
             throw RecError("Could not start writing: \(writer.error?.localizedDescription ?? "unknown")")
         }
-        try await stream.startCapture()
+        // Echo-cancelled mic first: Apple's voice processing outputs silence
+        // for its first ~2–3 s. Start it, wait until it delivers real sound,
+        // and only then start capturing — so the recording never begins with
+        // a muted mic (your first words would be lost).
         if let micCapture {
             do {
                 try micCapture.start { [weak self] sample in
@@ -328,17 +375,50 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
                     self.queue.async { self.handleMicSample(sample) }
                 }
             } catch {
-                try? await stream.stopCapture()
                 throw RecError("Could not start the microphone: \(error.localizedDescription)")
             }
+            await waitForMicWarmUp(timeout: 6)
+        }
+        do {
+            try await stream.startCapture()
+        } catch {
+            micCapture?.stop()
+            throw error
         }
         startDate = Date()
+    }
+
+    private var micWarm = false
+    private var micWarmUpContinuation: CheckedContinuation<Void, Never>?
+
+    /// Returns once the voice-processing mic delivers non-silent audio (room
+    /// tone counts), or after `timeout` seconds in a truly silent setup.
+    private func waitForMicWarmUp(timeout: Double) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            queue.async {
+                if self.micWarm { continuation.resume(); return }
+                self.micWarmUpContinuation = continuation
+                self.queue.asyncAfter(deadline: .now() + timeout) { self.markMicWarm() }
+            }
+        }
+    }
+
+    /// On `queue`.
+    private func markMicWarm() {
+        micWarm = true
+        micWarmUpContinuation?.resume()
+        micWarmUpContinuation = nil
     }
 
     /// Mic samples from the voice-processing path; same handling as SCK's
     /// `.microphone` output. Runs on `queue`.
     private func handleMicSample(_ sampleBuffer: CMSampleBuffer) {
         guard !finished, sampleBuffer.isValid, CMSampleBufferDataIsReady(sampleBuffer) else { return }
+        if !micWarm {
+            // Warm-up: voice processing fades in from digital silence.
+            if let level = rmsLevel(of: sampleBuffer), level > -75 { markMicWarm() }
+            return
+        }
         emitLevelIfDue(sampleBuffer, track: .microphone)
         if audioOnly { startSessionIfNeeded(at: sampleBuffer) }
         guard sessionStarted else { return }
@@ -348,6 +428,7 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
     /// Stops capture and finalizes the file. Safe to call exactly once;
     /// callers guard against double-invocation.
     public func stopAndFinish() async throws {
+        markerSaveQueue.sync {}   // markers on disk before post-processing reads them
         micCapture?.stop()
         try? await stream.stopCapture()
         queue.sync { finished = true }  // drain in-flight samples, then close the gate
@@ -474,12 +555,6 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
 
     private func emitLevelIfDue(_ sampleBuffer: CMSampleBuffer, track: AudioLevelTrack) {
         guard let onAudioLevel else { return }
-        if ProcessInfo.processInfo.environment["REC_DEBUG_AUDIO"] != nil, lastLevelEmit[track] == nil {
-            let asbd = CMSampleBufferGetFormatDescription(sampleBuffer)
-                .flatMap { CMAudioFormatDescriptionGetStreamBasicDescription($0)?.pointee }
-            let data = CMSampleBufferGetDataBuffer(sampleBuffer)
-            print("[debug] \(track): samples=\(CMSampleBufferGetNumSamples(sampleBuffer)) ready=\(CMSampleBufferDataIsReady(sampleBuffer)) hasBlock=\(data != nil) asbd=\(asbd.map { "flags=0x\(String($0.mFormatFlags, radix: 16)) bits=\($0.mBitsPerChannel) ch=\($0.mChannelsPerFrame) rate=\($0.mSampleRate)" } ?? "nil") level=\(rmsLevel(of: sampleBuffer).map { String($0) } ?? "nil")")
-        }
         guard let level = rmsLevel(of: sampleBuffer) else { return }
         levelPeak[track] = max(levelPeak[track] ?? -120, level)
         let now = CFAbsoluteTimeGetCurrent()
@@ -506,7 +581,9 @@ public final class Recorder: NSObject, SCStreamOutput, @unchecked Sendable {
 
     private func startSessionIfNeeded(at sampleBuffer: CMSampleBuffer) {
         guard !sessionStarted else { return }
-        writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
+        let start = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        writer.startSession(atSourceTime: start)
+        sessionStartTime = start
         sessionStarted = true
     }
 

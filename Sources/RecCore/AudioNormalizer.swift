@@ -33,13 +33,14 @@ public enum AudioNormalizer {
     /// otherwise have its noise floor pushed up to speech level.
     static let maxGainDB = 24.0
 
-    /// Processes every audio track of `fileURL` in place. `progress` receives
-    /// 0…1 across both passes (the first call, 0, means "started" — before it
-    /// the job is waiting for another clean-up to finish). Runs at low
-    /// priority so it can overlap a new recording. Cancellable: cancelling
-    /// the task stops ffmpeg. On any failure or cancellation the original file
-    /// is left untouched.
-    public static func normalize(fileURL: URL,
+    /// Post-recording pass, in place: cleans up and normalizes every audio
+    /// track (unless `cleanUpAudio` is false) and embeds the recording's
+    /// markers as chapters. `progress` receives 0…1 (the first call, 0, means
+    /// "started" — before it the job is waiting for another clean-up to
+    /// finish). Runs at low priority so it can overlap a new recording.
+    /// Cancellable: cancelling the task stops ffmpeg. On any failure or
+    /// cancellation the original file is left untouched.
+    public static func normalize(fileURL: URL, cleanUpAudio: Bool = true,
                                  progress: (@Sendable (Double) -> Void)? = nil) async throws {
         guard let ffmpeg = ffmpegPath else {
             throw RecError("ffmpeg not found — brew install ffmpeg (recording kept unprocessed)")
@@ -52,48 +53,67 @@ public enum AudioNormalizer {
         let asset = AVURLAsset(url: fileURL)
         let duration = try await asset.load(.duration).seconds
         let audioTracks = try await asset.loadTracks(withMediaType: .audio)
-        guard !audioTracks.isEmpty else { return }
+        let chapters = MarkerFile.ffmetadata(markers: MarkerFile.load(for: fileURL), duration: duration)
+        if !cleanUpAudio && chapters == nil { progress?(1); return }   // nothing to do
+        guard !audioTracks.isEmpty || chapters != nil else { return }
 
         // -- Pass 1: measure loudness of every track (after its chain), in parallel
-        let chains = audioTracks.indices.map { $0 == 1 ? micChain : systemChain }
-        let loudness = try await withThrowingTaskGroup(of: (Int, Double?).self) { group in
-            for (index, chain) in chains.enumerated() {
-                group.addTask {
-                    (index, try await measure(ffmpeg: ffmpeg, file: fileURL, track: index, chain: chain))
+        var filters: [String] = []
+        if cleanUpAudio {
+            let chains = audioTracks.indices.map { $0 == 1 ? micChain : systemChain }
+            let loudness = try await withThrowingTaskGroup(of: (Int, Double?).self) { group in
+                for (index, chain) in chains.enumerated() {
+                    group.addTask {
+                        (index, try await measure(ffmpeg: ffmpeg, file: fileURL, track: index, chain: chain))
+                    }
                 }
+                var results = [Double?](repeating: nil, count: chains.count)
+                for try await (index, value) in group { results[index] = value }
+                return results
             }
-            var results = [Double?](repeating: nil, count: chains.count)
-            for try await (index, value) in group { results[index] = value }
-            return results
-        }
-        progress?(0.3)
-
-        let filters: [String] = chains.enumerated().map { index, chain in
-            guard let measured = loudness[index] else {
-                // Silent track (e.g. window capture of an app that played no
-                // sound): nothing to normalize, just run the clean-up chain.
-                return chain
+            filters = chains.enumerated().map { index, chain in
+                guard let measured = loudness[index] else {
+                    // Silent track (e.g. window capture of an app that played no
+                    // sound): nothing to normalize, just run the clean-up chain.
+                    return chain
+                }
+                let gain = min(targetLUFS - measured, maxGainDB)
+                return "\(chain),volume=\(String(format: "%.2f", gain))dB,\(limiter)"
             }
-            let gain = min(targetLUFS - measured, maxGainDB)
-            return "\(chain),volume=\(String(format: "%.2f", gain))dB,\(limiter)"
         }
+        let applyStart = cleanUpAudio ? 0.3 : 0.0
+        progress?(applyStart)
 
         // -- Pass 2: apply, video copied, atomic swap --------------------------
         let tmpURL = fileURL.deletingLastPathComponent()
             .appendingPathComponent(".\(fileURL.lastPathComponent).normalizing.mov")
+        let chaptersURL = fileURL.deletingLastPathComponent()
+            .appendingPathComponent(".\(fileURL.lastPathComponent).chapters.txt")
         try? FileManager.default.removeItem(at: tmpURL)
+        defer { try? FileManager.default.removeItem(at: chaptersURL) }
 
-        var args = ["-v", "error", "-nostats", "-progress", "pipe:1", "-y",
-                    "-i", fileURL.path, "-map", "0",
-                    "-c:v", "copy", "-tag:v", "hvc1", "-c:s", "copy", "-c:a", "aac"]
-        for (index, track) in audioTracks.enumerated() {
-            var channels: UInt32 = 2
-            if let description = try? await track.load(.formatDescriptions).first,
-               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(description) {
-                channels = asbd.pointee.mChannelsPerFrame
+        var args = ["-v", "error", "-nostats", "-progress", "pipe:1", "-y", "-i", fileURL.path]
+        if let chapters {
+            try chapters.write(to: chaptersURL, atomically: true, encoding: .utf8)
+            args += ["-i", chaptersURL.path, "-map_chapters", "1"]
+        }
+        // Explicit maps: an existing chapter track is a data stream; copying it
+        // as well as writing chapters would duplicate them.
+        args += ["-map", "0:v?", "-map", "0:a", "-map", "0:s?",
+                 "-c:v", "copy", "-tag:v", "hvc1", "-c:s", "copy"]
+        if cleanUpAudio {
+            args += ["-c:a", "aac"]
+            for (index, track) in audioTracks.enumerated() {
+                var channels: UInt32 = 2
+                if let description = try? await track.load(.formatDescriptions).first,
+                   let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(description) {
+                    channels = asbd.pointee.mChannelsPerFrame
+                }
+                args += ["-filter:a:\(index)", filters[index],
+                         "-b:a:\(index)", channels > 1 ? "160k" : "96k"]
             }
-            args += ["-filter:a:\(index)", filters[index],
-                     "-b:a:\(index)", channels > 1 ? "160k" : "96k"]
+        } else {
+            args += ["-c:a", "copy"]   // chapters only: audio untouched
         }
         args.append(tmpURL.path)
 
@@ -102,7 +122,7 @@ public enum AudioNormalizer {
             result = try await runFFmpeg(ffmpeg, args, qos: .utility) { line in
                 guard duration > 0, line.hasPrefix("out_time_us="),
                       let us = Double(line.dropFirst("out_time_us=".count)) else { return }
-                progress?(0.3 + 0.7 * min(us / 1_000_000 / duration, 1.0))
+                progress?(applyStart + (1 - applyStart) * min(us / 1_000_000 / duration, 1.0))
             }
         } catch {
             try? FileManager.default.removeItem(at: tmpURL)   // cancelled mid-write

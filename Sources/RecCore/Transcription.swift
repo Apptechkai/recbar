@@ -23,10 +23,18 @@ public final class TranscriptionJob: @unchecked Sendable {
     public static let modelDownloadDirectory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/RecBar/models")
     public static let defaultModel = "large-v3"
+    /// Open speaker-separation models (SpeakerKit, CC-BY-4.0).
+    public static var speakerModelDirectory: URL {
+        modelDownloadDirectory.appendingPathComponent("speakerkit", isDirectory: true)
+    }
 
-    public init(input: URL, translateToEnglish: Bool = false) {
+    /// Tell the meeting's speakers apart (Speaker 1, 2, …) — on by default.
+    public let identifySpeakers: Bool
+
+    public init(input: URL, translateToEnglish: Bool = false, identifySpeakers: Bool = true) {
         self.input = input
         self.translateToEnglish = translateToEnglish
+        self.identifySpeakers = identifySpeakers
     }
 
     public func cancel() {
@@ -48,7 +56,8 @@ public final class TranscriptionJob: @unchecked Sendable {
         lock.lock(); currentProcess = process; lock.unlock()
     }
 
-    /// Runs the whole pipeline and returns the written .srt URL.
+    /// Runs the whole pipeline and returns the written .srt URL. Also writes
+    /// `<name>.transcript.json` beside it (who said what, for renaming).
     public func run() async throws -> URL {
         guard let ffmpeg = AudioNormalizer.ffmpegPath else {
             throw RecError("ffmpeg not found — brew install ffmpeg")
@@ -62,8 +71,10 @@ public final class TranscriptionJob: @unchecked Sendable {
         guard !audioTracks.isEmpty else {
             throw RecError("\(input.lastPathComponent) has no audio track.")
         }
-        // RecBar layout: exactly 2 audio tracks = system audio (them) + mic (me).
-        let labels: [String?] = audioTracks.count == 2 ? ["Them", "Me"] : [nil]
+        // Recall Bar layout: exactly 2 audio tracks = system audio (the
+        // meeting) + mic (you). Anything else: transcribe the first track.
+        let recBarLayout = audioTracks.count == 2
+        let trackCount = recBarLayout ? 2 : 1
 
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("recbar-subs-\(UUID().uuidString)")
@@ -80,9 +91,10 @@ public final class TranscriptionJob: @unchecked Sendable {
             onStatus?("Downloading the \(Self.defaultModel) model (first time only, ~1.5 GB)…")
         }
 
-        var cues: [SRT.Cue] = []
-        for (index, label) in labels.enumerated() {
-            let trackNote = labels.count == 2 ? " (track \(index + 1)/2)" : ""
+        var trackCues: [[SRT.Cue]] = []
+        var turns: SpeakerTurns?
+        for index in 0..<trackCount {
+            let trackNote = trackCount == 2 ? " (track \(index + 1)/2)" : ""
 
             onStatus?("Extracting audio\(trackNote)…")
             onProgress?(nil)
@@ -96,32 +108,124 @@ public final class TranscriptionJob: @unchecked Sendable {
             if translateToEnglish { args += ["--task", "translate"] }
             // whisperkit-cli --verbose renders a "] 42% |" bar; parse the percentage.
             let trackBase = Double(index)
-            let trackCount = Double(labels.count)
+            let total = Double(trackCount)
             let progress = onProgress
             try await run(whisper, args) { line in
                 guard let percent = Self.progressPercent(in: line) else { return }
-                progress?((trackBase + percent / 100.0) / trackCount)
+                progress?((trackBase + percent / 100.0) / total)
             }
 
             let srt = tmp.appendingPathComponent("track\(index).srt")
             guard let content = try? String(contentsOf: srt, encoding: .utf8) else {
                 throw RecError("whisperkit-cli produced no subtitles for track \(index + 1).")
             }
-            cues += SRT.parse(content).map { cue in
-                var cue = cue
-                if let label { cue.text = "[\(label)] \(cue.text)" }
-                return cue
+            trackCues.append(SRT.parse(content))
+
+            // Who is speaking: the meeting track (or the only track).
+            if identifySpeakers, index == 0, !trackCues[0].isEmpty {
+                onStatus?("Telling speakers apart\(trackNote)…")
+                onProgress?(nil)
+                do {
+                    turns = try await diarize(whisper: whisper, wav: wav, tmp: tmp)
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    onStatus?("Couldn't tell speakers apart (\(error)); continuing without.")
+                }
             }
         }
 
         onStatus?("Writing subtitles…")
-        cues.sort { $0.startMS < $1.startMS }
-        guard !cues.isEmpty else {
+        var transcript = buildTranscript(trackCues: trackCues, recBarLayout: recBarLayout, turns: turns)
+        guard !transcript.cues.isEmpty else {
             throw RecError("No speech was detected in \(input.lastPathComponent).")
         }
         let output = Self.availableOutputURL(for: input, translated: translateToEnglish)
-        try SRT.render(cues).write(to: output, atomically: true, encoding: .utf8)
+        transcript.subtitleFile = output.lastPathComponent
+        try transcript.save(to: Transcript.url(forSubtitles: output))
         return output
+    }
+
+    /// Assigns speakers, flags lines near markers, merges tracks in time order.
+    private func buildTranscript(trackCues: [[SRT.Cue]], recBarLayout: Bool,
+                                 turns: SpeakerTurns?) -> Transcript {
+        func seconds(_ ms: Int) -> Double { Double(ms) / 1000 }
+
+        // Meeting track: diarization clusters, numbered by first appearance.
+        let meetingCues = trackCues.first ?? []
+        let clusters = meetingCues.map { turns?.speaker(from: seconds($0.startMS), to: seconds($0.endMS)) }
+        var order: [String] = []
+        for case let cluster? in clusters where !order.contains(cluster) { order.append(cluster) }
+        let multiple = order.count >= 2
+
+        var speakers: [Transcript.Speaker] = []
+        if recBarLayout {
+            speakers.append(.init(id: "me", name: "Me", defaultName: "Me", isLocal: true))
+        }
+        if multiple {
+            for n in order.indices {
+                let name = "Speaker \(n + 1)"
+                speakers.append(.init(id: "s\(n + 1)", name: name, defaultName: name, isLocal: false))
+            }
+        } else if recBarLayout {
+            speakers.append(.init(id: "them", name: "Them", defaultName: "Them", isLocal: false))
+        }
+
+        var cues: [Transcript.Cue] = []
+        for (i, cue) in meetingCues.enumerated() {
+            var id: String?
+            if multiple, let cluster = clusters[i], let n = order.firstIndex(of: cluster) {
+                id = "s\(n + 1)"
+            } else if recBarLayout {
+                id = multiple ? nil : "them"
+            }
+            cues.append(.init(start: seconds(cue.startMS), end: seconds(cue.endMS),
+                              text: cue.text, speaker: id, marked: false))
+        }
+        if recBarLayout, trackCues.count > 1 {
+            cues += trackCues[1].map {
+                .init(start: seconds($0.startMS), end: seconds($0.endMS), text: $0.text, speaker: "me", marked: false)
+            }
+        }
+
+        // ★ markers: highlight what was said in the 15 s before each marker
+        // (you press it right after hearing something important). A marker
+        // with no speech nearby becomes its own line.
+        let markers = MarkerFile.load(for: input)
+        for marker in markers {
+            var hit = false
+            for i in cues.indices where cues[i].end > marker.time - 15 && cues[i].start < marker.time + 2 {
+                cues[i].marked = true
+                hit = true
+            }
+            if !hit {
+                cues.append(.init(start: marker.time, end: marker.time + 3,
+                                  text: marker.title, speaker: nil, marked: true))
+            }
+        }
+        cues.sort { $0.start < $1.start }
+
+        return Transcript(recording: input.path, subtitleFile: "", speakers: speakers,
+                          cues: cues, markers: markers)
+    }
+
+    /// Runs `whisperkit-cli diarize` (open SpeakerKit models, CC-BY-4.0,
+    /// ~11 MB, downloaded once) and returns the speaker turns.
+    private func diarize(whisper: String, wav: URL, tmp: URL) async throws -> SpeakerTurns {
+        let rttm = tmp.appendingPathComponent("speakers.rttm")
+        var args = ["diarize", "--audio-path", wav.path, "--rttm-path", rttm.path]
+        let models = Self.speakerModelDirectory
+            .appendingPathComponent("models/argmaxinc/speakerkit-coreml", isDirectory: true)
+        if FileManager.default.fileExists(atPath: models.appendingPathComponent("speaker_segmenter").path) {
+            args += ["--model-path", models.path]
+        } else {
+            try FileManager.default.createDirectory(at: Self.speakerModelDirectory, withIntermediateDirectories: true)
+            args += ["--download-model-path", Self.speakerModelDirectory.path]
+            onStatus?("Downloading the speaker models (first time only, 11 MB)…")
+        }
+        try await run(whisper, args)
+        let text = try String(contentsOf: rttm, encoding: .utf8)
+        return SpeakerTurns(rttm: text)
     }
 
     // MARK: - Subprocess plumbing

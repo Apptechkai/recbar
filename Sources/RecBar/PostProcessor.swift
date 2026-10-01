@@ -13,6 +13,7 @@ final class PostProcessor: ObservableObject {
     struct Job: Identifiable, Equatable {
         let id = UUID()
         let url: URL
+        var cleanUpAudio = true    // false: only embed marker chapters
     }
 
     struct Failure: Identifiable {
@@ -33,8 +34,8 @@ final class PostProcessor: ObservableObject {
     var isBusy: Bool { current != nil || !waiting.isEmpty }
     var pendingCount: Int { waiting.count + (current == nil ? 0 : 1) }
 
-    func enqueue(_ url: URL) {
-        waiting.append(Job(url: url))
+    func enqueue(_ url: URL, cleanUpAudio: Bool = true) {
+        waiting.append(Job(url: url, cleanUpAudio: cleanUpAudio))
         lastFinished = nil
         guard worker == nil else { return }
         worker = Task { [weak self] in await self?.drain() }
@@ -46,7 +47,7 @@ final class PostProcessor: ObservableObject {
             current = job
             fraction = nil
             do {
-                try await AudioNormalizer.normalize(fileURL: job.url) { [weak self] value in
+                try await AudioNormalizer.normalize(fileURL: job.url, cleanUpAudio: job.cleanUpAudio) { [weak self] value in
                     Task { @MainActor in
                         guard let self, self.current?.id == job.id else { return }
                         self.fraction = value

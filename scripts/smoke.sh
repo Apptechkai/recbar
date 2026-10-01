@@ -57,6 +57,7 @@ if ! [ -f /tmp/rec-cli.pid ]; then
   echo "  Grant Screen & System Audio Recording + Microphone to this terminal, then rerun."
   exit 1
 fi
+"$REC" mark "smoke marker" >/dev/null 2>&1   # ★ checked in section 8
 say -v Samantha "Reference speech through the default speakers for the echo cancellation check."
 if [ -n "$ALT_OUT" ]; then
   say -a "$ALT_OUT" -v Samantha "Control speech through the second output device, which the microphone should hear."
@@ -69,24 +70,41 @@ SYS_MAX=$(max_db "$A" 0)
 gt "$SYS_MAX" -40 && pass "system audio captured (peak ${SYS_MAX} dB)" || fail "system track silent (peak ${SYS_MAX} dB)"
 ffmpeg -v error -i "$A" -f null - 2>/dev/null && pass "file decodes cleanly" || fail "decode errors"
 
-if [ "$HAVE_NUMPY" = 1 ]; then
-  ffmpeg -v error -y -i "$A" -map 0:a:0 -ac 1 -ar 16000 "$WORK/sys.wav" -map 0:a:1 -ac 1 -ar 16000 "$WORK/mic.wav"
+OUTPUT_MUTED=$(osascript -e 'output muted of (get volume settings)' 2>/dev/null)
+OUTPUT_VOLUME=$(osascript -e 'output volume of (get volume settings)' 2>/dev/null)
+if [ "$OUTPUT_MUTED" = "true" ] || { [ -n "$OUTPUT_VOLUME" ] && [ "$OUTPUT_VOLUME" != "missing value" ] && [ "$OUTPUT_VOLUME" -lt 15 ]; }; then
+  skip "echo cancellation (sound output is muted or very low — nothing reaches the mic to cancel)"
+elif [ "$HAVE_NUMPY" = 1 ]; then
+  # Align both tracks on the movie timeline (aresample first_pts=0): tracks
+  # start at slightly different offsets, and post-processing may describe
+  # those offsets differently — extracting them unaligned skews the result.
+  ffmpeg -v error -y -i "$A" -map 0:a:0 -af "aresample=async=1:first_pts=0" -ac 1 -ar 16000 "$WORK/sys.wav" \
+                           -map 0:a:1 -af "aresample=async=1:first_pts=0" -ac 1 -ar 16000 "$WORK/mic.wav" </dev/null
   CORR=$(python3 - "$WORK" <<'EOF'
 import sys, wave, numpy as np
 W=sys.argv[1]
 def load(p):
     w=wave.open(p); return np.frombuffer(w.readframes(w.getnframes()),dtype=np.int16).astype(float)/32768
-a=load(f"{W}/sys.wav"); b=load(f"{W}/mic.wav"); n=min(len(a),len(b)); a=a[:n]-a[:n].mean(); b=b[:n]-b[:n].mean()
-best=0.0
-for lag in range(0,int(16000*0.3),32):
-    x=a[:n-lag]; y=b[lag:]
-    c=abs(float(np.dot(x,y)/(np.linalg.norm(x)*np.linalg.norm(y)+1e-9)))
-    best=max(best,c)
+a=load(f"{W}/sys.wav"); b=load(f"{W}/mic.wav"); n=min(len(a),len(b)); a=a[:n]; b=b[:n]
+# Only the reference speech (default speakers) should be cancelled; the
+# control speech that follows (second device) is meant to reach the mic.
+# Split the system track's speech at its longest pause.
+fr=800; env=np.array([np.sqrt(np.mean(a[i:i+fr]**2)) for i in range(0,n-fr,fr)])
+act=np.where(env>0.01)[0]
+if len(act) > 1:
+    gaps=np.diff(act); cut=act[np.argmax(gaps)]+1 if gaps.max() > 5 else act[-1]+1
+    lo, hi = act[0]*fr, cut*fr
+else:
+    lo, hi = 0, n
+x=a[lo:hi]-a[lo:hi].mean(); y=b[lo:hi]-b[lo:hi].mean(); m=len(x)
+best=max(abs(float(np.dot(x[:m-l],y[l:])/(np.linalg.norm(x[:m-l])*np.linalg.norm(y[l:])+1e-9))) for l in range(0,int(16000*0.3),16))
 print(f"{best:.3f}")
 EOF
 )
-  gt 0.15 "$CORR" && pass "echo cancellation: mic/system correlation ${CORR} (< 0.15)" \
-                  || fail "speaker audio leaking onto mic track (correlation ${CORR})"
+  # Without echo cancellation, speakers → mic measured ≈0.39 (10 Sep); with
+  # it, short clips land well below 0.2 (the canceller adapts in seconds).
+  gt 0.2 "$CORR" && pass "echo cancellation: mic/system correlation ${CORR} (< 0.2)" \
+                 || fail "speaker audio leaking onto mic track (correlation ${CORR})"
 else
   skip "echo-cancellation correlation (python3 numpy not installed)"
 fi
@@ -160,6 +178,21 @@ else
   skip "transcribe (whisperkit-cli not installed)"
 fi
 
+if command -v whisperkit-cli >/dev/null; then
+  # Two clearly different voices taking turns → two speakers, renamable.
+  for i in 1 2 3; do
+    say -v Samantha -o "$WORK/v$i-a.aiff" "This is the first speaker, talking about the project timeline and the budget for round $i."
+    say -v Daniel -o "$WORK/v$i-b.aiff" "And this is the second speaker, answering with questions about scope and staffing in round $i."
+  done
+  ffmpeg -v error -y $(for i in 1 2 3; do printf -- "-i %s -i %s " "$WORK/v$i-a.aiff" "$WORK/v$i-b.aiff"; done) \
+    -filter_complex "concat=n=6:v=0:a=1,aresample=16000" -ac 1 "$WORK/twovoices.wav"
+  "$REC" transcribe "$WORK/twovoices.wav" >"$WORK/tx2.log" 2>&1
+  SPEAKERS=$(grep -o '\[Speaker [0-9]*\]' "$WORK/twovoices.srt" 2>/dev/null | sort -u | wc -l | tr -d ' ')
+  [ "${SPEAKERS:-0}" -ge 2 ] && pass "told $SPEAKERS speakers apart" || fail "speakers not separated (found ${SPEAKERS:-0}):$(tail -3 "$WORK/tx2.log")"
+  "$REC" speakers "$WORK/twovoices.srt" "Speaker 1=Alice" >/dev/null 2>&1
+  grep -q '\[Alice\]' "$WORK/twovoices.srt" && pass "renamed Speaker 1 → Alice in the subtitles" || fail "rename didn't update the .srt"
+fi
+
 # ----------------------------------------------------------------------------
 section "6. Back-to-back recordings (clean-up runs in the background)"
 B1="$WORK/b2b-1.mov"; B2="$WORK/b2b-2.mov"
@@ -227,6 +260,19 @@ else
 fi
 [ -n "$FALLBACK" ] && rm -f "$FALLBACK"   # don't leave test clips in the user's folder
 restore_folder
+
+# ----------------------------------------------------------------------------
+section "8. Markers and mic start-up"
+if [ -f "${A%.mov}.markers.json" ] && grep -q "smoke marker" "${A%.mov}.markers.json"; then
+  pass "rec mark reached the recording"
+else
+  fail "no marker saved for the audio-only recording"
+fi
+CHAP=$(ffprobe -v error -show_chapters -of compact "$A" 2>/dev/null | grep -c "smoke marker")
+[ "$CHAP" -ge 1 ] && pass "marker embedded as a chapter" || fail "marker not embedded as a chapter"
+FIRST=$(ffmpeg -v info -t 0.5 -i "$A" -map 0:a:1 -af volumedetect -f null - 2>&1 | awk '/max_volume/{print $5}')
+gt "${FIRST:--999}" -85 && pass "mic live from the first half second (${FIRST} dB)" \
+  || fail "mic silent at the start (${FIRST} dB) — echo-canceller warm-up not handled"
 
 # ----------------------------------------------------------------------------
 printf "\n\033[1mResult:\033[0m %d passed, %d failed, %d skipped   (artifacts in %s)\n" "$PASS" "$FAIL" "$SKIP" "$WORK"

@@ -54,7 +54,18 @@ instead of guessed by a diarization model.
   while you're free to start the next recording. Video is stream-copied,
   never re-encoded.
 - **Local transcription to `.srt`** with WhisperKit (large-v3 on the Neural
-  Engine), speaker-labeled `[Me]` / `[Them]`; optional translate-to-English.
+  Engine); optional translate-to-English.
+- **Speakers told apart and named** — your mic track is `[Me]`; the meeting
+  track is split into Speaker 1, 2, 3… by on-device speaker separation. Rename
+  them once (with a ▶ sample of each voice to tell who's who) and the
+  subtitles update.
+- **★ Markers** — press **⌃⌥M** (or `rec mark "label"`) right after something
+  important is said. Markers become chapters in the video, and the transcript
+  highlights what was said in the 15 seconds before each one.
+- **Meeting detection** — when Zoom, Teams, Slack, Webex, FaceTime, Discord or
+  a browser meeting (Google Meet, Teams or Zoom on the web) starts using your
+  microphone, Recall Bar asks "Record this meeting?". When the call ends it
+  offers to stop. It never records without your click.
 - **Echo-cancelled microphone** — the mic is captured through macOS voice
   processing (the same path FaceTime uses), so the meeting audio coming out of
   your speakers doesn't end up on your mic track. Speakers work; headphones
@@ -252,9 +263,26 @@ cleaning up). If the folder isn't
 available when you press Start (say an external drive is unplugged), Recall Bar
 records to `~/Movies/recordings` instead and tells you, rather than failing.
 
+**Markers:** while recording, press **⌃⌥M** from any app (or *Add Marker* in
+the panel) right after something important is said. The Dock badge flashes
+★ and the panel lists your markers. After you stop they become chapters
+(QuickTime: View → Show Chapters), and transcripts mark the lines just before
+each one with ★.
+
+**Meeting detection:** with *Settings → Meeting detection* on (the default),
+Recall Bar notices a meeting app taking the microphone and asks — as a
+notification and in the panel — whether to record. *Record* starts with the
+panel's Source, or only the meeting app if you choose that in Settings. When
+the call ends (the app lets go of the mic for 8 s) it offers to stop. It only
+looks at *which app* holds the mic; nothing is recorded until you click.
+
 **Transcribe:** *Transcribe File to Subtitles…* → pick any video/audio file →
-a `.srt` appears next to it, with a live progress bar. Recall Bar recordings get
-`[Me]` / `[Them]` labels.
+a `.srt` appears next to it, with a live progress bar. Your mic track is
+labelled `[Me]`; voices on the meeting track become `[Speaker 1]`,
+`[Speaker 2]`… (or `[Them]` if there's only one). Click **Name Speakers…** to
+hear a sample of each voice and give them names — the subtitles are rewritten
+with the names. (Earlier transcripts: *File → Name Speakers in a
+Transcript…*.)
 
 ## Using the CLI
 
@@ -271,7 +299,11 @@ rec folder ~/Documents/Meetings    # where new recordings go (rec folder --reset
 rec windows                        # list capturable windows
 rec mics                           # list microphones
 rec normalize meeting.mov          # audio clean-up on an existing file, in place
-rec transcribe meeting.mov         # → meeting.srt (add --translate for English)
+rec mark "budget agreed"           # ★ marker in the running recording
+rec transcribe meeting.mov         # → meeting.srt, speakers labelled (--translate,
+                                   #   --no-speakers)
+rec speakers meeting.mov           # who's who: lines per speaker, a sample each
+rec speakers meeting.mov "Speaker 1=Alice" "Me=Kai"   # rename (.srt rewritten)
 rec export meeting.mov             # → meeting-share.mp4, one mixed audio track
 ```
 
@@ -328,7 +360,9 @@ make smoke     # ~1 minute; plays a few seconds of speech through your speakers
 
 Records for real and checks the results with ffprobe — track layout, levels,
 echo cancellation (mic/speaker correlation), window sizing, normalize, export,
-and transcription of known speech, plus back-to-back recording and the folder setting. 28 checks; see
+transcription of known speech, two voices told apart and renamed, back-to-back
+recording, the folder setting, markers becoming chapters, and the mic being
+live from the first second. 33 checks; see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## How it works
@@ -345,9 +379,21 @@ the Recall Bar app (the `RecBar` target) are thin front ends over it. See [CONTR
 Recall Bar doesn't phone home. Recordings and transcripts stay in
 `~/Movies/recordings/` (or wherever you point it). It only goes online in two
 cases, both started by you: **Check for Updates** in Settings (one request to
-GitHub's public API) and the WhisperKit model download the first time you
-transcribe. Please check your local laws and let participants know when you
+GitHub's public API) and the one-time model downloads the first time you
+transcribe (WhisperKit, plus 11 MB of speaker-separation models). Meeting
+detection uses the same information as the menu bar's orange microphone dot —
+which app is using the mic — and never listens to or records anything on its
+own. Please check your local laws and let participants know when you
 record a conversation.
+
+## Credits
+
+Speaker separation uses Argmax's [SpeakerKit Core ML
+models](https://huggingface.co/argmaxinc/speakerkit-coreml) (based on
+pyannote), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/),
+run through `whisperkit-cli`. Transcription uses
+[WhisperKit](https://github.com/argmaxinc/argmax-oss-swift) and OpenAI's
+Whisper models.
 
 ## License
 

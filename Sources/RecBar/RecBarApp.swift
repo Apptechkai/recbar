@@ -27,6 +27,9 @@ struct RecBarApp: App {
                 Button("Settings…") { SettingsWindow.shared.show() }
                     .keyboardShortcut(",", modifiers: .command)
             }
+            CommandGroup(after: .newItem) {
+                Button("Name Speakers in a Transcript…") { SpeakersWindow.shared.pickAndShow() }
+            }
         }
     }
 }
@@ -38,11 +41,15 @@ struct PanelView: View {
     @ObservedObject var transcriber: Transcriber
     @ObservedObject var exporter = Exporter.shared
     @ObservedObject var processor = PostProcessor.shared
+    @ObservedObject var detector = MeetingDetector.shared
     @State private var optionsExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
+            if let meeting = detector.startPrompt, !controller.isRecording {
+                meetingBanner(meeting)
+            }
             Section(title: "Record", icon: "record.circle") {
                 if controller.isRecording {
                     recordingLive
@@ -62,6 +69,28 @@ struct PanelView: View {
         }
         .padding(16)
         .frame(width: 360)
+    }
+
+    // MARK: Meeting detection banners
+
+    private func meetingBanner(_ meeting: MeetingDetector.Meeting) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "phone.fill").foregroundStyle(.green).font(.title3)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(meeting.label) is using your microphone")
+                    .font(.callout.weight(.medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("Record") { Task { await detector.record(meeting) } }
+                        .buttonStyle(.borderedProminent).tint(.red)
+                    Button("Not Now") { detector.dismissStart() }
+                }
+                .controlSize(.small)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.12)))
     }
 
     // MARK: Header
@@ -165,13 +194,23 @@ struct PanelView: View {
             Button {
                 Task { await controller.start() }
             } label: {
-                Label("Start Recording", systemImage: "record.circle.fill")
-                    .frame(maxWidth: .infinity)
+                Group {
+                    if controller.isStarting {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Starting…")
+                        }
+                    } else {
+                        Label("Start Recording", systemImage: "record.circle.fill")
+                    }
+                }
+                .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .tint(.red)   // record = red, stop = neutral (recorder convention)
             .controlSize(.large)
             .keyboardShortcut(.defaultAction)
+            .disabled(controller.isStarting)
 
             // Where it will be saved — click to change.
             let destination = RecPaths.resolveRecordingsDirectory()
@@ -215,6 +254,20 @@ struct PanelView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            if let meeting = detector.endPrompt {
+                HStack(spacing: 8) {
+                    Image(systemName: "phone.down.fill").foregroundStyle(.orange)
+                    Text("The \(meeting.appName) call seems to have ended.")
+                        .font(.caption).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Button("Stop") { Task { await detector.stopRecording() } }
+                    Button("Keep") { detector.keepRecording() }
+                }
+                .controlSize(.small)
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.12)))
+            }
+
             LevelMeter(label: "Mic", detail: controller.activeMicName, level: controller.micLevel)
             if controller.micSilentSeconds >= 3 {
                 Label("No mic signal for \(controller.micSilentSeconds)s — muted or wrong microphone?",
@@ -222,6 +275,36 @@ struct PanelView: View {
                     .font(.caption2).foregroundStyle(.orange)
             }
             LevelMeter(label: "Meeting", detail: "system audio", level: controller.systemLevel)
+
+            // ★ markers
+            HStack(spacing: 8) {
+                Button {
+                    controller.addMarker()
+                } label: {
+                    Label("Add Marker", systemImage: "star.fill")
+                }
+                .controlSize(.small)
+                Text("⌃⌥M from anywhere").font(.caption2).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                InfoButton("""
+                Press ⌃⌥M (or this button) right after something important is said. \
+                Markers become chapters in the video, and the transcript highlights \
+                with ★ what was said in the 15 seconds before each marker. From a \
+                terminal: rec mark "label".
+                """)
+            }
+            if !controller.markers.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(controller.markers.suffix(3).reversed()) { marker in
+                        Text("★ \(marker.timeText)  \(marker.title)")
+                            .font(.caption).monospacedDigit()
+                            .lineLimit(1).truncationMode(.tail)
+                    }
+                    if controller.markers.count > 3 {
+                        Caption("\(controller.markers.count) markers so far")
+                    }
+                }
+            }
 
             if let preview = controller.previewImage {
                 Image(decorative: preview, scale: 1)
@@ -342,6 +425,14 @@ struct PanelView: View {
                 }
             } else if let result = transcriber.resultURL {
                 ResultRow(url: result)
+                if transcriber.hasSpeakers {
+                    Button {
+                        if let json = Transcript.locate(for: result) { SpeakersWindow.shared.show(transcriptURL: json) }
+                    } label: {
+                        Label("Name Speakers…", systemImage: "person.2")
+                    }
+                    .controlSize(.small)
+                }
             } else if let error = transcriber.errorText {
                 ErrorText(error)
             }
@@ -563,7 +654,9 @@ struct LevelMeter: View {
     let detail: String
     let level: Float   // dBFS
 
-    private var fraction: Double { Double(min(max(level + 60, 0), 60) / 60) }
+    /// −80 dB (empty) … 0 dB (full): quiet room tone (~−60 dB with noise
+    /// suppression) still shows as a sliver, so "on but quiet" ≠ "dead".
+    private var fraction: Double { Double(min(max(level + 80, 0), 80) / 80) }
     private var color: Color {
         if level > -6 { return .red }        // near clipping
         if level > -40 { return .green }     // healthy signal
@@ -585,7 +678,7 @@ struct LevelMeter: View {
                 }
             }
             .frame(height: 8)
-            Text(level <= -59 ? "—" : String(format: "%.0f dB", level))
+            Text(level <= -85 ? "—" : String(format: "%.0f dB", level))
                 .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
                 .frame(width: 44, alignment: .trailing)
         }

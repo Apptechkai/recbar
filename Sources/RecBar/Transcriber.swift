@@ -13,6 +13,8 @@ final class Transcriber: ObservableObject {
     @Published private(set) var statusText = ""
     @Published private(set) var fraction: Double?  // nil = indeterminate
     @Published private(set) var resultURL: URL?
+    /// The last transcript has speaker labels worth naming.
+    @Published private(set) var hasSpeakers = false
     @Published private(set) var errorText: String?
     @Published var translateToEnglish = false
 
@@ -38,6 +40,7 @@ final class Transcriber: ObservableObject {
         isBusy = true
         errorText = nil
         resultURL = nil
+        hasSpeakers = false
         fraction = nil
         statusText = "Starting…"
         defer {
@@ -61,6 +64,9 @@ final class Transcriber: ObservableObject {
         do {
             let srt = try await job.run()
             resultURL = srt
+            hasSpeakers = Transcript.locate(for: srt)
+                .flatMap { try? Transcript.load(from: $0) }
+                .map { !$0.speakers.isEmpty } ?? false
             statusText = "Done"
             NSWorkspace.shared.activateFileViewerSelecting([srt])
         } catch is CancellationError {
