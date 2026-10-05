@@ -75,9 +75,6 @@ instead of guessed by a diarization model.
 - **Nothing leaves your Mac.** No account, no telemetry, no network calls
   (other than the one-time model download for transcription, if you opt in).
 
-<p align="center">
-  <img src="docs/panel.png" width="360" alt="Recall Bar panel">
-</p>
 
 ## Install
 

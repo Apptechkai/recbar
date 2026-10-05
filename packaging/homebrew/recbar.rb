@@ -1,3 +1,5 @@
+# NOT PUBLISHED YET — template for a future Homebrew tap. Needs a tagged
+# release (v1.0.0) and its tarball sha256 before it can be used.
 # Homebrew formula for a tap, e.g. github.com/Apptechkai/homebrew-recbar
 # Install: brew tap Apptechkai/recbar && brew install recbar
 class Recbar < Formula
