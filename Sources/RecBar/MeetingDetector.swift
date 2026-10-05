@@ -114,7 +114,11 @@ final class MeetingDetector: NSObject, ObservableObject, UNUserNotificationCente
 
     func refreshNotificationStatus() {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
-            let allowed = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
+            // Only an explicit "Don't Allow" counts as off; "not asked yet"
+            // isn't worth a warning.
+            let status = settings.authorizationStatus
+            let allowed: Bool? = status == .denied ? false
+                : (status == .authorized || status == .provisional) ? true : nil
             Task { @MainActor in self.notificationsAllowed = allowed }
         }
     }

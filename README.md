@@ -13,6 +13,10 @@
 <p align="center"><sub>Formerly RecBar — the repository and the <code>rec</code> command keep that name.</sub></p>
 
 <p align="center">
+  📖 <strong><a href="docs/user-guide.md">User Guide</a></strong> — install, record, transcribe and share, step by step
+</p>
+
+<p align="center">
   <a href="https://github.com/Apptechkai/recbar/actions"><img src="https://github.com/Apptechkai/recbar/actions/workflows/build.yml/badge.svg" alt="Build"></a>
   <img src="https://img.shields.io/badge/macOS-15.2%2B-blue" alt="macOS 15.2+">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT">
@@ -34,6 +38,10 @@ what you tell it to via Apple's ScreenCaptureKit, and writes one `.mov`:
 The two audio tracks are **never mixed**. That's the whole point: each side of
 the conversation can be transcribed on its own, so "who said what" is exact
 instead of guessed by a diarization model.
+
+<p align="center">
+  <img src="docs/images/panel.png" width="360" alt="The Recall Bar panel">
+</p>
 
 ## Features
 
@@ -77,6 +85,8 @@ instead of guessed by a diarization model.
 
 
 ## Install
+
+New to Terminal? The **[User Guide](docs/user-guide.md)** walks through every step with screenshots.
 
 Recall Bar is currently installed by building it from source. A signed download
 is planned; until then, one command does everything.

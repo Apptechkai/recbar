@@ -104,7 +104,7 @@ public final class TranscriptionJob: @unchecked Sendable {
 
             onStatus?("Transcribing\(trackNote)…")
             var args = ["transcribe", "--audio-path", wav.path] + modelArgs
-                + ["--report", "--report-path", tmp.path, "--verbose"]
+                + ["--report", "--report-path", tmp.path, "--verbose", "--word-timestamps"]
             if translateToEnglish { args += ["--task", "translate"] }
             // whisperkit-cli --verbose renders a "] 42% |" bar; parse the percentage.
             let trackBase = Double(index)
@@ -115,11 +115,26 @@ public final class TranscriptionJob: @unchecked Sendable {
                 progress?((trackBase + percent / 100.0) / total)
             }
 
-            let srt = tmp.appendingPathComponent("track\(index).srt")
-            guard let content = try? String(contentsOf: srt, encoding: .utf8) else {
-                throw RecError("whisperkit-cli produced no subtitles for track \(index + 1).")
+            // Word-level timings from the JSON report give accurate line times
+            // (segment times drift on mostly-silent tracks); lines over
+            // silence — Whisper's known habit of inventing "Thank you." or
+            // "Продолжение следует..." — are dropped by an energy check.
+            let report = tmp.appendingPathComponent("track\(index).json")
+            var cues: [SRT.Cue]
+            if let data = try? Data(contentsOf: report),
+               let parsed = try? JSONDecoder().decode(WhisperReport.self, from: data) {
+                cues = parsed.cues()
+            } else {
+                let srt = tmp.appendingPathComponent("track\(index).srt")
+                guard let content = try? String(contentsOf: srt, encoding: .utf8) else {
+                    throw RecError("whisperkit-cli produced no subtitles for track \(index + 1).")
+                }
+                cues = SRT.parse(content)
             }
-            trackCues.append(SRT.parse(content))
+            if let activity = SpeechActivity(wav: wav) {
+                cues = cues.filter { activity.isSpeech(from: Double($0.startMS) / 1000, to: Double($0.endMS) / 1000) }
+            }
+            trackCues.append(cues)
 
             // Who is speaking: the meeting track (or the only track).
             if identifySpeakers, index == 0, !trackCues[0].isEmpty {
@@ -340,6 +355,73 @@ public final class TranscriptionJob: @unchecked Sendable {
             counter += 1
         }
         return candidate
+    }
+}
+
+/// The parts of whisperkit-cli's `--report` JSON we use.
+struct WhisperReport: Decodable {
+    struct Word: Decodable { let start: Double; let end: Double }
+    struct Segment: Decodable {
+        let start: Double
+        let end: Double
+        let text: String
+        let words: [Word]?
+    }
+    let segments: [Segment]
+
+    func cues() -> [SRT.Cue] {
+        segments.compactMap { segment in
+            let text = segment.text
+                .replacingOccurrences(of: #"<\|[^|]*\|>"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            let start = segment.words?.first?.start ?? segment.start
+            let end = max(segment.words?.last?.end ?? segment.end, start + 0.2)
+            return SRT.Cue(startMS: Int((start * 1000).rounded()), endMS: Int((end * 1000).rounded()), text: text)
+        }
+    }
+}
+
+/// Loudness over time for one 16 kHz mono track, to tell speech from
+/// silence/room tone. The background level is the track's 10th-percentile
+/// loudness (pauses); speech sits well above it.
+struct SpeechActivity {
+    private let frameDB: [Float]          // 50 ms frames
+    private let floorDB: Float
+    private let duration: Double
+    private static let frame = 800        // samples at 16 kHz
+
+    init?(wav: URL) {
+        guard let file = try? AVAudioFile(forReading: wav),
+              let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 16_000 * 10)
+        else { return nil }
+        var levels: [Float] = []
+        var sum: Float = 0
+        var count = 0
+        while (try? file.read(into: buffer)) != nil, buffer.frameLength > 0, let data = buffer.floatChannelData?[0] {
+            for i in 0..<Int(buffer.frameLength) {
+                sum += data[i] * data[i]
+                count += 1
+                if count == Self.frame {
+                    levels.append(10 * log10(max(sum / Float(count), 1e-12)))
+                    sum = 0
+                    count = 0
+                }
+            }
+        }
+        guard levels.count >= 10 else { return nil }
+        frameDB = levels
+        floorDB = levels.sorted()[levels.count / 10]
+        duration = Double(levels.count) * 0.05
+    }
+
+    /// True if the track is clearly louder than its background during
+    /// [start, end] — real speech, not a line invented over silence.
+    func isSpeech(from start: Double, to end: Double) -> Bool {
+        guard start < duration else { return false }
+        let a = max(0, Int(start / 0.05)), b = min(frameDB.count, max(a + 1, Int(end / 0.05) + 1))
+        let power = frameDB[a..<b].reduce(Float(0)) { $0 + pow(10, $1 / 10) } / Float(b - a)
+        return 10 * log10(max(power, 1e-12)) >= floorDB + 8
     }
 }
 

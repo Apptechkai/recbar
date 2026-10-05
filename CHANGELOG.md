@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **User guide** (`docs/user-guide.md`) with screenshots rendered from the
+  app's own views (`scripts/doc-screenshots/render.sh`, demo data only).
+- Transcripts: line times come from word-level timings (accurate even on
+  mostly silent tracks), and lines Whisper invents over silence ("Thank
+  you.", "Продолжение следует...") are dropped by comparing each line's
+  loudness with the track's background level.
+- Settings only warns about notifications after an explicit "Don't Allow".
 - **★ Markers**: ⌃⌥M (global), *Add Marker* in the panel, or `rec mark
   [label]`. Saved to `<name>.markers.json` as you go, embedded as video
   chapters after Stop (also when audio clean-up is off), carried into shared

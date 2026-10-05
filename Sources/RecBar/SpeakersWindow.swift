@@ -76,7 +76,7 @@ struct SpeakersView: View {
                     set: { names[speaker.id] = $0; saved = false }))
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 200)
-                Text("\(summary.lineCount) lines · \(Marker.clock(summary.talkTime)) talking")
+                Text("\(summary.lineCount) line\(summary.lineCount == 1 ? "" : "s") · \(Marker.clock(summary.talkTime)) talking")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 if let first = summary.firstLines.first {
