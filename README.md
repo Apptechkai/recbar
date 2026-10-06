@@ -70,9 +70,9 @@ instead of guessed by a diarization model.
 - **★ Markers** — press **⌃⌥M** (or `rec mark "label"`) right after something
   important is said. Markers become chapters in the video, and the transcript
   highlights what was said in the 15 seconds before each one.
-- **Meeting detection** — when Zoom, Teams, Slack, Webex, FaceTime, Discord or
+- **Meeting detection** — when Zoom, Teams, Slack, Webex, FaceTime, WhatsApp, Discord or
   a browser meeting (Google Meet, Teams or Zoom on the web) starts using your
-  microphone, Recall Bar asks "Record this meeting?". When the call ends it
+  microphone, Recall Bar asks "Record this call?". When the call ends it
   offers to stop. It never records without your click.
 - **Echo-cancelled microphone** — the mic is captured through macOS voice
   processing (the same path FaceTime uses), so the meeting audio coming out of

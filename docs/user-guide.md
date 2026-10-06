@@ -82,7 +82,7 @@ macOS protects your screen and microphone, so Recall Bar has to ask once.
    Recall Bar restarts.
 
 Recall Bar may also ask to send **notifications**. Allow them if you want it
-to ask "Record this meeting?" when a call starts (see section 6).
+to ask "Record this call?" when a call starts (see section 6).
 
 ## 4. Opening Recall Bar
 
@@ -151,11 +151,11 @@ straight away. Recall Bar then cleans up the audio in the background: a
 
 Recall Bar can notice when a meeting starts and ask whether to record it.
 It recognises **Zoom, Microsoft Teams, Slack huddles, Webex, FaceTime,
-Discord**, and meetings in a browser (**Google Meet, Teams or Zoom on the
+WhatsApp, Discord**, and meetings in a browser (**Google Meet, Teams or Zoom on the
 web** in Chrome, Edge, Brave, Arc, Firefox or Safari).
 
 - When a meeting app starts using your microphone, Recall Bar asks **"Record
-  this meeting?"**. You'll see a notification, plus a banner in the panel.
+  this call?"**. You'll see a notification, plus a banner in the panel.
   Click **Record** or **Not Now**.
 - When the call ends, Recall Bar offers to **stop the recording**. It waits
   until the meeting app has let go of the microphone for 8 seconds.
@@ -245,7 +245,7 @@ Open **Settings** with the **gear icon** in the panel, or press **⌘ ,**.
   because an external drive is unplugged, Recall Bar records to
   *Movies → recordings* instead and tells you.
 - **Keep the Recall Bar window on top**: same as *Keep on top* in the panel.
-- **Meeting detection**: turn the "Record this meeting?" prompts and the
+- **Meeting detection**: turn the "Record this call?" prompts and the
   "call ended" offer on or off. **Record** chooses what a detected meeting
   records: the panel's Source, or **Meeting app only**.
 - **Updates**: shows your version. See the next section.

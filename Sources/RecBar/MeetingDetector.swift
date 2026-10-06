@@ -56,6 +56,7 @@ final class MeetingDetector: NSObject, ObservableObject, UNUserNotificationCente
         ("com.webex.meetingmanager", "Webex", false),
         ("com.apple.FaceTime", "FaceTime", false),
         ("com.hnc.Discord", "Discord", false),
+        ("net.whatsapp.WhatsApp", "WhatsApp", false),
         ("com.google.Chrome", "Google Chrome", true),
         ("com.microsoft.edgemac", "Microsoft Edge", true),
         ("com.brave.Browser", "Brave", true),
@@ -240,7 +241,7 @@ final class MeetingDetector: NSObject, ObservableObject, UNUserNotificationCente
         note("asking to record \(meeting.label)")
         notify(id: "start-\(meeting.id)", category: "meetingStart",
                title: "\(meeting.label) is using your microphone",
-               body: "Record this meeting? (Recall Bar records nothing until you say so.)")
+               body: "Record this call? (Recall Bar records nothing until you say so.)")
         if autoAccept { Task { await record(meeting) } }
     }
 

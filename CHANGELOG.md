@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Meeting detection recognises **WhatsApp** calls (desktop app); the prompt
+  now reads "Record this call?".
 - **User guide** (`docs/user-guide.md`) with screenshots rendered from the
   app's own views (`scripts/doc-screenshots/render.sh`, demo data only).
 - Transcripts: line times come from word-level timings (accurate even on

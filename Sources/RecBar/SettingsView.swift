@@ -90,7 +90,7 @@ struct SettingsView: View {
             } header: {
                 Text("Meeting detection")
             } footer: {
-                Text("Recall Bar notices when Zoom, Teams, Slack, Webex, FaceTime, Discord or a browser (Google Meet, Teams or Zoom on the web) starts using your microphone. It only checks which app holds the mic and never records until you click Record.")
+                Text("Recall Bar notices when Zoom, Teams, Slack, Webex, FaceTime, WhatsApp, Discord or a browser (Google Meet, Teams or Zoom on the web) starts using your microphone. It only checks which app holds the mic and never records until you click Record.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
