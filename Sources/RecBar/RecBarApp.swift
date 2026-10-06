@@ -42,7 +42,7 @@ struct PanelView: View {
     @ObservedObject var exporter = Exporter.shared
     @ObservedObject var processor = PostProcessor.shared
     @ObservedObject var detector = MeetingDetector.shared
-    @State private var optionsExpanded = false
+    @ViewState private var optionsExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -569,7 +569,7 @@ private struct IconButton: View {
 /// ⓘ that opens an explanation popover.
 struct InfoButton: View {
     let text: String
-    @State private var shown = false
+    @ViewState private var shown = false
 
     init(_ text: String) { self.text = text }
 

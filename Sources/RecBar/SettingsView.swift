@@ -8,9 +8,9 @@ struct SettingsView: View {
     @ObservedObject var controller = RecController.shared
     @ObservedObject var updater = Updater.shared
     @ObservedObject var detector = MeetingDetector.shared
-    @State private var folder = RecPaths.resolveRecordingsDirectory()
-    @State private var isCustom = RecSettings.customRecordingsFolder != nil
-    @State private var error: String?
+    @ViewState private var folder = RecPaths.resolveRecordingsDirectory()
+    @ViewState private var isCustom = RecSettings.customRecordingsFolder != nil
+    @ViewState private var error: String?
 
     var body: some View {
         Form {

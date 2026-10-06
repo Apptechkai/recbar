@@ -11,13 +11,13 @@ struct SpeakersView: View {
     let transcriptURL: URL
     let onClose: () -> Void
 
-    @State private var transcript: Transcript?
-    @State private var names: [String: String] = [:]
-    @State private var error: String?
-    @State private var saved = false
-    @State private var player: AVPlayer?
-    @State private var playing: String?
-    @State private var stopWork: DispatchWorkItem?
+    @ViewState private var transcript: Transcript?
+    @ViewState private var names: [String: String] = [:]
+    @ViewState private var error: String?
+    @ViewState private var saved = false
+    @ViewState private var player: AVPlayer?
+    @ViewState private var playing: String?
+    @ViewState private var stopWork: DispatchWorkItem?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
